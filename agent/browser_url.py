@@ -24,12 +24,18 @@ log = logging.getLogger("agent.browser_url")
 _UIA_EDIT = 50004
 # property id for ControlType
 _UIA_CONTROLTYPE_PROPERTY = 30003
-# ValuePattern id
-_UIA_VALUE_PATTERN = 10002
+# ValueValue property id — reading this directly is far more robust than fetching the
+# ValuePattern and casting it (verified on real Windows: the omnibox Edit exposes the
+# full URL on this property).
+_UIA_VALUEVALUE_PROPERTY = 30045
+# TreeScope_Descendants
+_TREESCOPE_DESCENDANTS = 4
 
-# AutomationId/Name hints for the address bar across browsers (best-effort; we also fall
-# back to "the first Edit descendant that looks like a URL").
-_OMNIBOX_HINTS = ("url_field", "address and search bar", "address field", "search or enter address")
+# Name hints for the address bar across browsers (Edge/Chrome = "Address and search bar";
+# Firefox = "Search with ... or enter address"). We also fall back to the first Edit whose
+# value looks like a URL.
+_OMNIBOX_HINTS = ("address and search bar", "address field", "search or enter address",
+                  "enter address", "url")
 
 
 class UrlReader:
@@ -42,12 +48,13 @@ class UrlReader:
 
     def _init_uia(self):
         try:
-            import comtypes.client  # lazy: only on Windows w/ comtypes installed
-            # CUIAutomation CLSID; comtypes generates the interface from the type library
-            self._uia = comtypes.client.CreateObject(
-                "{ff48dba4-60ef-4201-aa87-54103eef594e}",  # CLSID_CUIAutomation
-                interface=None,
-            )
+            # Lazy + Windows-only. The CORRECT comtypes pattern: generate the typed module
+            # from the type library first, THEN create the coclass — otherwise CreateObject
+            # returns an untyped IUnknown and ElementFromHandle/etc. don't exist on it.
+            from comtypes.client import CreateObject, GetModule
+            GetModule("UIAutomationCore.dll")              # one-time codegen (cached)
+            from comtypes.gen.UIAutomationClient import CUIAutomation
+            self._uia = CreateObject(CUIAutomation)
         except Exception as e:
             self._ok = False
             log.info("UI Automation unavailable (urls will fall back to title): %s", e)
@@ -71,13 +78,10 @@ class UrlReader:
             return None
 
     def _find_omnibox_value(self, root) -> Optional[str]:
-        """Find the address-bar Edit control and read its ValuePattern value."""
+        """Find the address-bar Edit control and read its value (the URL)."""
         try:
-            import comtypes
-            # Condition: ControlType == Edit
             cond = self._uia.CreatePropertyCondition(_UIA_CONTROLTYPE_PROPERTY, _UIA_EDIT)
-            # TreeScope_Descendants = 4
-            edits = root.FindAll(4, cond)
+            edits = root.FindAll(_TREESCOPE_DESCENDANTS, cond)
             n = edits.Length if edits else 0
             best = None
             for i in range(n):
@@ -97,19 +101,12 @@ class UrlReader:
             return None
 
     def _value_of(self, element) -> Optional[str]:
+        # Read the ValueValue property directly — robust and avoids fragile pattern casting.
         try:
-            pat = element.GetCurrentPattern(_UIA_VALUE_PATTERN)
-            if not pat:
-                return None
-            import comtypes
-            vp = pat.QueryInterface(comtypes.gen.UIAutomationClient.IUIAutomationValuePattern) \
-                if hasattr(comtypes, "gen") else pat
-            return vp.CurrentValue or None
+            v = element.GetCurrentPropertyValue(_UIA_VALUEVALUE_PROPERTY)
+            return v or None
         except Exception:
-            try:
-                return element.GetCurrentPropertyValue(10003) or None  # ValueValue prop fallback
-            except Exception:
-                return None
+            return None
 
     @staticmethod
     def _normalize(url: Optional[str]) -> Optional[str]:
