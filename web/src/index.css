@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-bg text-ink font-sans text-sm;
+  }
+}
+
+@layer components {
+  /* Pulsing "live" dot, ported from the floor masthead. */
+  .live-dot {
+    @apply inline-block h-2 w-2 rounded-full bg-gold;
+    box-shadow: 0 0 0 0 rgba(212, 175, 55, 0.6);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(212, 175, 55, 0.6); }
+    70% { box-shadow: 0 0 0 8px rgba(212, 175, 55, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(212, 175, 55, 0); }
+  }
+  .card {
+    @apply bg-surface border border-border rounded p-4;
+  }
+}

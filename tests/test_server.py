@@ -1,0 +1,86 @@
+"""Settings, dashboard-controlled work hours, self-serve enrollment + agent-config,
+and the install endpoints — exercised against a live server."""
+import os
+import sys
+import json
+import threading
+import tempfile
+import unittest
+import urllib.request
+import urllib.error
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+from server import api, db, auth  # noqa: E402
+
+
+class TestServer(unittest.TestCase):
+    def setUp(self):
+        fd, self.path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        pre = db.connect(self.path)
+        db.init_db(pre)
+        pre.close()
+        self.srv = api.make_server(0, self.path)
+        self.port = self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self.port}"
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+        os.unlink(self.path)
+
+    def _get(self, path):
+        with urllib.request.urlopen(self.url + path) as r:
+            return r.status, r.read()
+
+    def _post_json(self, path, obj):
+        req = urllib.request.Request(self.url + path, data=json.dumps(obj).encode(),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req) as r:
+            return json.loads(r.read())
+
+    def test_settings_and_work_hours(self):
+        with self.srv.lock:
+            c = self.srv.conn
+            self.assertEqual(db.get_setting(c, "work_start"), "8")
+            db.set_setting(c, "work_start", "9")
+            db.set_setting(c, "work_days", "0,1,2")
+            wh = db.work_hours(c)
+        self.assertEqual(wh["work_start"], 9)
+        self.assertEqual(wh["work_days"], [0, 1, 2])
+
+    def test_self_serve_enroll_and_config(self):
+        with self.srv.lock:
+            code = auth.issue_enrollment_code(self.srv.conn, machine_id=None, label="Sam")
+        token = self._post_json("/api/v1/enroll", {"code": code, "hostname": "LAPTOP-SAM"})["token"]
+        self.assertTrue(token.startswith("eat_"))
+        # agent fetches the dashboard-set work hours
+        _, body = self._get("/api/v1/agent-config?token=" + token)
+        wh = json.loads(body)
+        self.assertIn("work_start", wh)
+        self.assertIn("work_days", wh)
+        # a change made on the dashboard is reflected to the agent
+        with self.srv.lock:
+            db.set_setting(self.srv.conn, "work_start", "10")
+        _, body2 = self._get("/api/v1/agent-config?token=" + token)
+        self.assertEqual(json.loads(body2)["work_start"], 10)
+
+    def test_agent_config_rejects_bad_token(self):
+        with self.assertRaises(urllib.error.HTTPError):
+            self._get("/api/v1/agent-config?token=eat_nope")
+
+    def test_install_endpoints(self):
+        # GET /setup is now a React route served by the SPA fallback (web/dist or a
+        # "build the UI" hint when unbuilt) — the agent install one-liner comes from
+        # /install.ps1, which is what we assert here.
+        _, script = self._get("/install.ps1?code=abc123")
+        self.assertIn(b"CoverageAgent", script)
+        self.assertIn(b"abc123", script)
+        _, zipb = self._get("/download/agent.zip")
+        self.assertEqual(zipb[:2], b"PK")  # zip magic number
+
+
+if __name__ == "__main__":
+    unittest.main()
