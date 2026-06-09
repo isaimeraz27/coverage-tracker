@@ -1,10 +1,10 @@
-# Build the Coverage agent into a single coverage-agent.exe — RUN ON WINDOWS (the VM).
+# Build the Coverage agent into a single coverage-agent.exe - RUN ON WINDOWS (the VM).
 # PyInstaller cannot cross-compile from macOS, so this runs on the Windows EC2 VM.
 #
 #   cd <repo root>
 #   powershell -ExecutionPolicy Bypass -File scripts\build_agent.ps1
 #
-# Output: dist\coverage-agent.exe   (then copy it to where the server serves it — see
+# Output: dist\coverage-agent.exe   (then copy it to where the server serves it - see
 # docs\AGENT_EXE_BUILD.md). Re-run whenever anything under agent\, shared\contracts.py, or
 # scripts\run_agent.py changes.
 $ErrorActionPreference = 'Stop'
@@ -25,6 +25,6 @@ if (Test-Path dist\coverage-agent.exe) {
     Write-Host "Built: dist\coverage-agent.exe"
     Write-Host "Next: dist\coverage-agent.exe --selftest   (confirm capture + URL work frozen)"
 } else {
-    Write-Host "BUILD FAILED — dist\coverage-agent.exe not found."
+    Write-Host "BUILD FAILED - dist\coverage-agent.exe not found."
     exit 1
 }
