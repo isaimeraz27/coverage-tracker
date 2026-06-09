@@ -895,6 +895,26 @@ class Handler(BaseHTTPRequestHandler):
             hist.append(ins)
         return engine.attention_with_persistence(hist)
 
+    def _incomplete_workflow_nudge(self, uid, day):
+        """Coaching-only: a producer who STARTS quote workflows but doesn't complete them
+        (e.g. never saves to the AMS) on >=3 of the last 5 days. A single incomplete day is
+        normal ('finishing it after lunch'), so we only surface the PERSISTENT pattern. This
+        is an informational nudge, never a verdict — it never trips the attention gate.
+        Returns None or a dict {days, recent_templates}."""
+        base = dt.date.fromisoformat(day)
+        days_with_incomplete = 0
+        templates_seen = set()
+        for i in range(5):
+            d = (base - dt.timedelta(days=i)).isoformat()
+            _, _, extra = rollup.compute_day_full(self.conn, uid, d)
+            incompletes = [t for t in extra.get("tasks", []) if not t.get("matched")]
+            if incompletes:
+                days_with_incomplete += 1
+                templates_seen.update(t["template"] for t in incompletes)
+        if days_with_incomplete >= 3:
+            return {"days": days_with_incomplete, "templates": sorted(templates_seen)}
+        return None
+
     def _person(self, uid, day):
         usr = self.conn.execute(
             "SELECT au.id, au.display_name, au.username, au.role_fk, r.name role "
@@ -907,6 +927,14 @@ class Handler(BaseHTTPRequestHandler):
         person = {"name": usr["display_name"] or usr["username"], "role": usr["role"]}
         on_task = db.role_on_task_set(self.conn, usr["role_fk"])
         ins_d = present_insight(self.conn, ins, extra, user_fk=uid, day=day)
+        # Persistent incomplete-workflow coaching nudge (info-only; never a verdict).
+        nudge = self._incomplete_workflow_nudge(uid, day)
+        if nudge:
+            tmpls = ", ".join(t.replace("_", " ") for t in nudge["templates"])
+            ins_d["flags"] = list(ins_d.get("flags", [])) + [{
+                "code": "incomplete_workflow_streak", "severity": "info", "positive": False,
+                "message": f"Started but didn't complete {tmpls} on {nudge['days']} of the last 5 days — worth a check-in",
+            }]
         return (person, ins_d, extra.get("top", []), self._person_timeline(uid, day),
                 on_task, extra.get("tasks", []))
 

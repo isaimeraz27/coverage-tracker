@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { api, Person } from "../lib/api";
+import { api, Person, localDay } from "../lib/api";
 import { Masthead } from "../components/Masthead";
 import { ScoreDonut } from "../components/ScoreDonut";
 
@@ -10,7 +10,7 @@ const pct = (x: number) => `${Math.round(x * 100)}%`;
 export function PersonPage() {
   const { uid } = useParams();
   const [sp] = useSearchParams();
-  const day = sp.get("day") || new Date().toISOString().slice(0, 10);
+  const day = sp.get("day") || localDay();   // LOCAL date, not UTC
   const [data, setData] = useState<Person | null>(null);
   const [err, setErr] = useState("");
 

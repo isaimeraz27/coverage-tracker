@@ -1,6 +1,23 @@
 // Typed fetch wrappers for the Coverage dashboard JSON API.
 // All requests send cookies (manager session). 401 → callers route to /login.
 
+// LOCAL calendar date as YYYY-MM-DD. NOTE: do NOT use Date.toISOString() for "today" —
+// that returns the UTC date, which in US timezones is already "tomorrow" in the evening,
+// so the dashboard would request a day with no data and render empty. This uses the
+// browser's local date, matching how the server buckets a user's day.
+export function localDay(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+export function shiftLocalDay(ymd: string, n: number): string {
+  const d = new Date(ymd + "T12:00:00"); // noon avoids DST edge-cases
+  d.setDate(d.getDate() + n);
+  return localDay(d);
+}
+
 export type Mode = "coaching" | "evaluative";
 
 export interface BootstrapStatus {

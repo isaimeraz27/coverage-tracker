@@ -1,15 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, Card, Overview as OverviewData } from "../lib/api";
+import { api, Card, Overview as OverviewData, localDay, shiftLocalDay } from "../lib/api";
 import { Masthead } from "../components/Masthead";
 import { ScoreDonut } from "../components/ScoreDonut";
 
-const today = () => new Date().toISOString().slice(0, 10);
-const shiftDay = (d: string, n: number) => {
-  const dt = new Date(d + "T00:00:00");
-  dt.setDate(dt.getDate() + n);
-  return dt.toISOString().slice(0, 10);
-};
+const today = () => localDay();           // LOCAL date, not UTC (see api.localDay)
+const shiftDay = shiftLocalDay;
 
 export function Overview() {
   const [day, setDay] = useState(today());
