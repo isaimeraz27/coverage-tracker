@@ -44,35 +44,35 @@ MAX_INGEST_BODY = 5_000_000        # 5 MB per batch
 MAX_BATCH_EVENTS = 1000
 _RL: dict = {}                     # (bucket, ip) -> [timestamps]
 RATE_LIMITS = {"ingest": (300, 60), "enroll": (20, 60), "setup": (20, 60), "download": (30, 60)}
-# files bundled into the self-serve agent download
+# The prebuilt standalone agent — built on the Windows VM (scripts/build_agent.ps1) and
+# placed here; served at /download/agent.exe. This is the production delivery path.
+AGENT_EXE = os.path.join(_BASE, "dist", "coverage-agent.exe")
+
+# LEGACY/DEV fallback: the Python-source zip at /download/agent.zip. The installer no longer
+# points at this (the .exe replaced it); kept for dev + a couple of tests. Remove once the
+# exe flow is proven in production.
 AGENT_BUNDLE = ["shared/contracts.py", "agent/agent.py", "agent/capture.py",
                 "agent/redaction.py", "agent/buffer.py", "agent/shipper.py",
-                "agent/browser_url.py", "scripts/run_agent.py"]
+                "agent/browser_url.py", "agent/paths.py", "scripts/run_agent.py"]
 
-# PowerShell self-serve installer (no admin rights needed — per-user logon task).
-# In production, ship a PyInstaller-built agent.exe instead of requiring Python.
-_PS_INSTALL = r"""# Coverage activity agent - self-serve install (no admin required)
+# PowerShell self-serve installer: downloads ONE standalone .exe — no Python, no pip, no admin.
+# Registers a per-user logon task and starts it hidden. Used by BOTH delivery paths (the
+# admin Machines page and employee self-enroll) since both build the one-liner from /install.ps1.
+_PS_INSTALL = r"""# Coverage activity agent - self-serve install (no admin, no Python required)
 $ErrorActionPreference = 'Stop'
 $Server = '__SERVER__'
 $Code   = '__CODE__'
 $Dir = Join-Path $env:LOCALAPPDATA 'CoverageAgent'
 New-Item -ItemType Directory -Force -Path $Dir | Out-Null
+$Exe = Join-Path $Dir 'coverage-agent.exe'
 Write-Host 'Downloading Coverage agent...'
-Invoke-WebRequest -Uri "$Server/download/agent.zip" -OutFile (Join-Path $Dir 'agent.zip')
-Expand-Archive -Path (Join-Path $Dir 'agent.zip') -DestinationPath $Dir -Force
+Invoke-WebRequest -Uri "$Server/download/agent.exe" -OutFile $Exe
+# config.json (next to the exe) carries the server URL + enrollment code the agent reads.
 (@{ server = $Server; code = $Code } | ConvertTo-Json) | Set-Content -Path (Join-Path $Dir 'config.json')
-$py = (Get-Command python -ErrorAction SilentlyContinue).Source
-if (-not $py) { $py = (Get-Command py -ErrorAction SilentlyContinue).Source }
-if (-not $py) { Write-Host 'Python 3 is required - install it from https://python.org and re-run this command.'; return }
-# best-effort: comtypes enables real browser-URL capture (UI Automation). If this fails the
-# agent still runs, falling back to title-based URLs.
-try { & $py -m pip install --user --quiet comtypes 2>$null } catch { Write-Host 'comtypes install skipped (URLs will be title-based).' }
-$runner = Join-Path $Dir 'scripts\run_agent.py'
 # run at every logon as the current user (no admin needed)
-schtasks /Create /TN 'CoverageAgent' /TR ('"' + $py + '" "' + $runner + '"') /SC ONLOGON /F | Out-Null
-$env:TRACKER_SERVER = $Server
-$env:TRACKER_ENROLL_CODE = $Code
-Start-Process -FilePath $py -ArgumentList ('"' + $runner + '"') -WindowStyle Hidden
+schtasks /Create /TN 'CoverageAgent' /TR ('"' + $Exe + '"') /SC ONLOGON /F | Out-Null
+# start now, hidden (a console exe started hidden shows no window)
+Start-Process -FilePath $Exe -WindowStyle Hidden
 Write-Host 'Coverage agent installed. It runs at each login and tracks only during business hours.'
 """
 SESSIONS: dict[str, dict] = {}   # sid -> manager row dict
@@ -311,7 +311,11 @@ class Handler(BaseHTTPRequestHandler):
         # GET /setup is now a React route (served by the SPA fallback); the POST handler stays.
         if u.path == "/install.ps1":
             return self._serve_install(q)
-        if u.path == "/download/agent.zip":
+        if u.path == "/download/agent.exe":
+            if not self._rl("download"):
+                return self._json(429, {"error": "rate limited"})
+            return self._serve_agent_exe()
+        if u.path == "/download/agent.zip":   # legacy/dev fallback
             if not self._rl("download"):
                 return self._json(429, {"error": "rate limited"})
             return self._serve_agent_zip()
@@ -977,6 +981,22 @@ class Handler(BaseHTTPRequestHandler):
         data = script.encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_agent_exe(self):
+        """Stream the prebuilt standalone agent. Built out-of-band on the Windows VM
+        (scripts/build_agent.ps1) and copied to AGENT_EXE; 404 with a hint if it's not there."""
+        if not os.path.isfile(AGENT_EXE):
+            return self._json(404, {"error": "agent.exe not built yet — run "
+                                    "scripts/build_agent.ps1 on the Windows VM and place it at "
+                                    "dist/coverage-agent.exe"})
+        with open(AGENT_EXE, "rb") as fh:
+            data = fh.read()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Disposition", "attachment; filename=coverage-agent.exe")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)

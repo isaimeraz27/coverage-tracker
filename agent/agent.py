@@ -15,9 +15,11 @@ from typing import Optional
 
 import logging  # noqa: E402
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if not getattr(sys, "frozen", False):   # frozen exe already has shared/agent bundled
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared import contracts as C  # noqa: E402
 from agent import capture as cap, redaction, buffer  # noqa: E402
+from agent.paths import data_path  # noqa: E402
 
 CFG = C.CONFIG_DEFAULTS
 log = logging.getLogger("agent")
@@ -137,7 +139,7 @@ def run_agent(server_url: str, token: str, username: str,
     poll_s = poll_s or wh.get("poll_ms", CFG["poll_ms"]) / 1000.0
     full_url = bool(wh.get("full_url", False))
     capture = cap.make_capture(allow_full_url=full_url)
-    outbox = buffer.Outbox()
+    outbox = buffer.Outbox(data_path("agent_outbox.db"))  # absolute — logon task CWD is unwritable
     shipper = Shipper(server_url, token, username)
     seg = Segmenter(allow_full_url=full_url)
     outbox.enqueue(C.to_wire(C.AttendanceEvent(ts=_iso(time.time()),

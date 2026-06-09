@@ -48,6 +48,15 @@ class UrlReader:
 
     def _init_uia(self):
         try:
+            # Redirect comtypes' generated-module dir to a WRITABLE location BEFORE any
+            # GetModule. In a PyInstaller onefile exe the bundled comtypes/gen/ lives in the
+            # read-only _MEIPASS temp dir, so GetModule's runtime codegen would fail; point it
+            # at %LOCALAPPDATA%\CoverageAgent\gen (matches the installer's dir convention).
+            import os as _os, tempfile as _tmp, comtypes.client as _cc
+            _gen = _os.path.join(_os.environ.get("LOCALAPPDATA", _tmp.gettempdir()),
+                                 "CoverageAgent", "gen")
+            _os.makedirs(_gen, exist_ok=True)
+            _cc.gen_dir = _gen
             # Lazy + Windows-only. The CORRECT comtypes pattern: generate the typed module
             # from the type library first, THEN create the coclass — otherwise CreateObject
             # returns an untyped IUnknown and ElementFromHandle/etc. don't exist on it.

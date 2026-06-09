@@ -15,3 +15,8 @@ web/dist/
 *.pem
 web/*.tsbuildinfo
 web/tsconfig.tsbuildinfo
+# PyInstaller agent build (built on the Windows VM; the exe is copied to the served path)
+build/coverage-agent/
+dist/
+config.json
+agent_token.txt

@@ -10,13 +10,16 @@ import sys
 import json
 import getpass
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-INSTALL = os.path.dirname(HERE)          # the install dir ($Dir); config.json lives here
-sys.path.insert(0, INSTALL)
+# Source mode: add the repo root so `agent`/`shared` import. Frozen mode (PyInstaller exe):
+# modules are already bundled, and there is no repo root, so DON'T insert a bogus path.
+if not getattr(sys, "frozen", False):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agent import agent, shipper          # noqa: E402
+from agent.paths import data_path          # noqa: E402
 
-CONFIG = os.path.join(INSTALL, "config.json")
-TOKEN_FILE = os.path.join(INSTALL, "agent_token.txt")
+# config.json / token live next to the install dir (the exe's dir when frozen).
+CONFIG = data_path("config.json")
+TOKEN_FILE = data_path("agent_token.txt")
 
 
 def _load_config() -> dict:
@@ -37,7 +40,9 @@ def _selftest():
     check to run on a fresh Windows VM. Exits cleanly on non-Windows (no real backend)."""
     import time
     from agent import capture as cap
-    print("=== agent self-test ===")
+    from agent.paths import AGENT_VERSION
+    frozen = "frozen exe" if getattr(sys, "frozen", False) else "source"
+    print(f"=== agent self-test (v{AGENT_VERSION}, {frozen}) ===")
     try:
         from agent import browser_url
         avail = browser_url.UrlReader().available

@@ -72,14 +72,40 @@ class TestServer(unittest.TestCase):
             self._get("/api/v1/agent-config?token=eat_nope")
 
     def test_install_endpoints(self):
-        # GET /setup is now a React route served by the SPA fallback (web/dist or a
-        # "build the UI" hint when unbuilt) — the agent install one-liner comes from
-        # /install.ps1, which is what we assert here.
+        # The install one-liner comes from /install.ps1. It now delivers the standalone
+        # .exe — no Python, no pip, no zip.
         _, script = self._get("/install.ps1?code=abc123")
         self.assertIn(b"CoverageAgent", script)
         self.assertIn(b"abc123", script)
+        self.assertIn(b"/download/agent.exe", script)
+        self.assertNotIn(b"pip install", script)
+        self.assertNotIn(b"Expand-Archive", script)
+        # legacy zip route still serves (dev fallback)
         _, zipb = self._get("/download/agent.zip")
         self.assertEqual(zipb[:2], b"PK")  # zip magic number
+
+    def test_agent_exe_route(self):
+        import urllib.error
+        from server import api as _api
+        # not built -> helpful 404
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            self._get("/download/agent.exe")
+        self.assertEqual(cm.exception.code, 404)
+        # built -> 200 with the bytes + download disposition
+        fd, exe = tempfile.mkstemp(suffix=".exe")
+        os.write(fd, b"MZ-fake-exe-bytes")
+        os.close(fd)
+        orig = _api.AGENT_EXE
+        try:
+            _api.AGENT_EXE = exe
+            req = urllib.request.Request(self.url + "/download/agent.exe")
+            with urllib.request.urlopen(req) as r:
+                self.assertEqual(r.status, 200)
+                self.assertIn("attachment", r.headers.get("Content-Disposition", ""))
+                self.assertEqual(r.read(), b"MZ-fake-exe-bytes")
+        finally:
+            _api.AGENT_EXE = orig
+            os.unlink(exe)
 
 
 if __name__ == "__main__":
