@@ -170,6 +170,10 @@ class TestPersonPayload(unittest.TestCase):
         with urllib.request.urlopen(req) as r:
             body = json.loads(r.read())
         self.assertIn("breakdown", body)
+        self.assertTrue(body["breakdown"], "breakdown should be non-empty")
+        self.assertIn("category", body["breakdown"][0])
+        self.assertIn("children", body["breakdown"][0])
+        self.assertEqual(body["breakdown"][0]["category"], "dev_tools")
         self.assertNotIn("tasks", body)
         self.assertIsInstance(body["timeline"], dict)
         self.assertIn("hours", body["timeline"])
