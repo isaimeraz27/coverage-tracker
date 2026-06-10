@@ -113,12 +113,18 @@ def build_ledger(conn, user_fk: int, day: str):
     return L, extra, stream
 
 
-def hourly_buckets(rows, work_hours: dict) -> dict:
+def hourly_buckets(rows, work_hours: dict, coarse_lookup=None) -> dict:
     """Aggregate activity rows into per-clock-hour buckets for the person timeline.
 
     Pure: takes DB rows (ts, sub_category, state, active_ms, idle_ms, is_meeting) and the
     work-hours window. Buckets by the clock hour of `ts`. Hours OUTSIDE the work window that
     have activity are still included, so odd-hour data is never hidden (the original bug).
+
+    `coarse_lookup` is an optional callable `sub_category -> coarse_string` used to classify
+    productive-vs-distracting. When provided (e.g. db.coarse_for bound to a conn), it is the
+    AUTHORITATIVE source — matching build_ledger/the breakdown so the bar chart agrees with
+    the data beside it. When None, falls back to the static C.coarse_of seed (keeps the pure
+    tests working). Both paths compare on the string class value.
     """
     ws = work_hours.get("work_start", 8)
     we = work_hours.get("work_end", 18)
@@ -141,8 +147,11 @@ def hourly_buckets(rows, work_hours: dict) -> dict:
         elif r["state"] == C.ActivityState.IDLE.value:
             _b(h)["idle_s"] += round(idle)
         else:
-            coarse = C.coarse_of(r["sub_category"])
-            if coarse == C.CoarseClass.DISTRACTING:
+            if coarse_lookup is not None:
+                coarse = coarse_lookup(r["sub_category"])
+            else:
+                coarse = C.coarse_of(r["sub_category"]).value
+            if coarse == C.CoarseClass.DISTRACTING.value:
                 _b(h)["distracting_s"] += round(active)
             else:
                 _b(h)["productive_s"] += round(active)

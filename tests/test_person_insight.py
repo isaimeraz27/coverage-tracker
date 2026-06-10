@@ -126,6 +126,20 @@ class TestHourlyTimeline(unittest.TestCase):
         hours = [h["hour"] for h in out["hours"]]
         self.assertEqual(hours, [8, 9, 10, 11])
 
+    def test_coarse_lookup_override_is_authoritative(self):
+        day = "2026-06-09"
+        _ev(self.conn, self.uid, day + "T09:00:00+00:00", "code", None, "dev_tools", 600_000)
+        self.conn.commit()
+        rows = self.conn.execute(
+            "SELECT ts, sub_category, state, active_ms, idle_ms, is_meeting, app, domain "
+            "FROM activity_event WHERE user_fk=? AND substr(ts_norm,1,10)=? ORDER BY ts_norm",
+            (self.uid, day)).fetchall()
+        out = rollup.hourly_buckets(rows, {"work_start": 8, "work_end": 18},
+                                    coarse_lookup=lambda sub: "distracting")
+        by_hour = {h["hour"]: h for h in out["hours"]}
+        self.assertEqual(by_hour[9]["distracting_s"], 600)
+        self.assertEqual(by_hour[9]["productive_s"], 0)
+
 
 class TestPersonPayload(unittest.TestCase):
     """The person HTTP payload exposes `breakdown`, drops `tasks`, and serves the

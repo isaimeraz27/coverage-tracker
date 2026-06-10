@@ -940,7 +940,8 @@ class Handler(BaseHTTPRequestHandler):
             "SELECT ts, sub_category, state, active_ms, idle_ms, is_meeting "
             "FROM activity_event WHERE user_fk=? AND substr(ts_norm,1,10)=? ORDER BY ts_norm",
             (uid, day)).fetchall()
-        return rollup.hourly_buckets(rows, db.work_hours(self.conn))
+        return rollup.hourly_buckets(rows, db.work_hours(self.conn),
+                                     coarse_lookup=lambda sub: db.coarse_for(self.conn, sub))
 
     # -- self-serve install --------------------------------------------------- #
     def _serve_install(self, q):
