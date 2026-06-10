@@ -7,6 +7,13 @@ import { ScoreDonut } from "../components/ScoreDonut";
 const h = (s: number) => `${(s / 3600).toFixed(1)}h`;
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
+const TL_COLORS = {
+  productive: "#D4AF37",
+  meeting: "#F4D77A",
+  distracting: "rgba(176,0,32,.55)",
+  idle: "#cdcdcd",
+} as const;
+
 export function PersonPage() {
   const { uid } = useParams();
   const [sp] = useSearchParams();
@@ -71,24 +78,19 @@ export function PersonPage() {
         </Warn>
       )}
 
-      {data.timeline.length > 0 && (
-        <div className="card mt-4">
-          <h3 className="font-serif font-semibold mb-2">Day timeline</h3>
-          <div className="relative h-6 bg-[#f1f1f1] rounded overflow-hidden">
-            {data.timeline.map((s, i) => (
-              <span
-                key={i}
-                title={s.t}
-                className="absolute top-0 h-full"
-                style={{ left: `${s.l}%`, width: `${Math.max(s.w, 0.4)}%`, background: s.c }}
-              />
-            ))}
-          </div>
-          <div className="flex justify-between text-[11px] text-muted mt-1">
-            <span>8a</span><span>10a</span><span>12p</span><span>2p</span><span>4p</span><span>6p</span>
-          </div>
-        </div>
-      )}
+      {data.timeline.hours.length > 0 && <HourlyTimeline tl={data.timeline} />}
+
+      <div className="card mt-4 flex flex-wrap gap-x-6 gap-y-1 text-[13px]">
+        <span>On-task <b>{pct(ins.adherence)}</b></span>
+        <span>Distraction <b>{pct(ins.distract_ratio)}</b></span>
+        <span>Meeting <b>{h(ins.meeting_s)}</b></span>
+        <span>Idle <b>{h(ins.idle_long_s)}</b></span>
+        {data.breakdown[0] && (
+          <span className="text-muted">
+            Top: {data.breakdown[0].category.replace(/_/g, " ")} ({(data.breakdown[0].secs / 3600).toFixed(1)}h)
+          </span>
+        )}
+      </div>
 
       <div className="grid md:grid-cols-2 gap-4 mt-4">
         <div className="card">
@@ -100,29 +102,7 @@ export function PersonPage() {
           <Row label="Meeting" value={h(ins.meeting_s)} />
           <Row label="Idle (long)" value={h(ins.idle_long_s)} />
         </div>
-        <div className="card">
-          <h3 className="font-serif font-semibold mb-2">Where the hours went</h3>
-          {data.top.length === 0 && <div className="text-muted text-[13px]">no activity</div>}
-          {data.top.map((t) => {
-            const on = data.on_task_set.includes(t.sub);
-            const max = data.top[0]?.secs || 1;
-            return (
-              <div key={t.sub} className="flex items-center gap-2 mb-1.5 text-[13px]">
-                <span className="h-2 w-2 rounded-full" style={{ background: on ? "#D4AF37" : "#cfcfcf" }} />
-                <span className="flex-1">
-                  {t.sub} <span className="text-muted">{on ? "· expected" : "· not in role"}</span>
-                </span>
-                <span className="w-[120px]">
-                  <span
-                    className="inline-block h-2 rounded"
-                    style={{ width: `${Math.min(100, (t.secs / max) * 100)}%`, background: on ? "#D4AF37" : "#cfcfcf" }}
-                  />
-                </span>
-                <b className="w-[46px] text-right">{(t.secs / 3600).toFixed(1)}h</b>
-              </div>
-            );
-          })}
-        </div>
+        <CategoryBreakdown key={day} breakdown={data.breakdown} onTask={data.on_task_set} />
       </div>
 
       <div className="card mt-4">
@@ -148,50 +128,7 @@ export function PersonPage() {
         </div>
       </div>
 
-      <TasksCard tasks={data.tasks} />
     </Shell>
-  );
-}
-
-function TasksCard({ tasks }: { tasks: Person["tasks"] }) {
-  if (!tasks || tasks.length === 0) return null;
-  const mins = (s: number) => `${Math.round(s / 60)}m`;
-  return (
-    <div className="card mt-4">
-      <h3 className="font-serif font-semibold mb-1">Tasks today</h3>
-      <p className="text-muted text-[12px] mb-3">
-        Detected workflows — a coaching signal for training conversations, not an evaluation.
-      </p>
-      <div className="grid gap-2">
-        {tasks.map((t, i) => (
-          <div key={i} className="border border-border rounded p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <b className="text-[14px]">{t.template.replace(/_/g, " ")}</b>
-              {!t.matched && (
-                <span className="text-[11px] px-2 py-0.5 rounded bg-gold/15">
-                  incomplete{t.steps_missing.length ? ` — missing ${t.steps_missing.join(", ")}` : ""}
-                </span>
-              )}
-              <span className="ml-auto text-[13px] text-muted">
-                {mins(t.duration_s)}
-                {t.vs_expected != null && (
-                  <> · {t.vs_expected > 1 ? "+" : ""}{Math.round((t.vs_expected - 1) * 100)}% vs expected</>
-                )}
-              </span>
-            </div>
-            <div className="flex flex-wrap items-center gap-1 text-[12px] text-muted">
-              {t.steps_hit.map((s, j) => (
-                <span key={j} className="flex items-center gap-1">
-                  {j > 0 && <span>→</span>}
-                  <span className="px-1.5 py-0.5 rounded bg-gold/10 text-ink">{s}</span>
-                </span>
-              ))}
-              <span className="ml-2">· {t.tool_switches} tool-switches · {Math.round(t.on_task_ratio * 100)}% on-task</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -234,4 +171,105 @@ function Row({ label, value, note }: { label: string; value: string; note?: stri
 
 function Warn({ children }: { children: React.ReactNode }) {
   return <div className="bg-gold-l/20 border border-gold rounded px-4 py-2 my-3 text-[13px]">{children}</div>;
+}
+
+function HourlyTimeline({ tl }: { tl: Person["timeline"] }) {
+  const ampm = (n: number) =>
+    n === 0 ? "12a" : n < 12 ? `${n}a` : n === 12 ? "12p" : `${n - 12}p`;
+  const max = 3600;
+  const seg = (s: number, c: string, key: string) =>
+    s > 0 ? <div key={key} style={{ height: `${(s / max) * 100}%`, background: c }} /> : null;
+  return (
+    <div className="card mt-4">
+      <h3 className="font-serif font-semibold mb-2">Activity by hour</h3>
+      <div className="flex items-end gap-1 h-28">
+        {tl.hours.map((hr) => {
+          const total = hr.productive_s + hr.meeting_s + hr.distracting_s + hr.idle_s;
+          return (
+            <div key={hr.hour} className="flex-1 flex flex-col items-center justify-end h-full">
+              <div
+                className="w-full flex flex-col-reverse rounded-sm overflow-hidden bg-[#f4f4f4] h-full"
+                title={`${ampm(hr.hour)} — ${Math.round(total / 60)}m active`}
+              >
+                {seg(hr.productive_s, TL_COLORS.productive, "p")}
+                {seg(hr.meeting_s, TL_COLORS.meeting, "m")}
+                {seg(hr.distracting_s, TL_COLORS.distracting, "d")}
+                {seg(hr.idle_s, TL_COLORS.idle, "i")}
+              </div>
+              <span className="text-[10px] text-muted mt-1">{ampm(hr.hour)}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex gap-3 mt-2 text-[11px] text-muted">
+        <Legend c={TL_COLORS.productive} t="productive" />
+        <Legend c={TL_COLORS.meeting} t="meeting" />
+        <Legend c={TL_COLORS.distracting} t="distracting" />
+        <Legend c={TL_COLORS.idle} t="idle" />
+      </div>
+    </div>
+  );
+}
+
+function Legend({ c, t }: { c: string; t: string }) {
+  return (
+    <span className="flex items-center gap-1">
+      <span className="h-2 w-2 rounded-full" style={{ background: c }} /> {t}
+    </span>
+  );
+}
+
+function CategoryBreakdown({
+  breakdown, onTask,
+}: { breakdown: Person["breakdown"]; onTask: string[] }) {
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const pretty = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+  const maxSecs = breakdown[0]?.secs || 1;
+  return (
+    <div className="card">
+      <h3 className="font-serif font-semibold mb-2">Where the hours went</h3>
+      {breakdown.length === 0 && <div className="text-muted text-[13px]">no activity</div>}
+      {breakdown.map((c) => {
+        const on = onTask.includes(c.category);
+        const isOpen = open.has(c.category);
+        return (
+          <div key={c.category} className="mb-1.5">
+            <button
+              className="w-full flex items-center gap-2 text-[13px] text-left"
+              onClick={() =>
+                setOpen((p) => {
+                  const n = new Set(p);
+                  if (n.has(c.category)) n.delete(c.category);
+                  else n.add(c.category);
+                  return n;
+                })
+              }
+            >
+              <span className="text-muted w-3">{isOpen ? "▾" : "▸"}</span>
+              <span className="h-2 w-2 rounded-full" style={{ background: on ? "#D4AF37" : "#cfcfcf" }} />
+              <span className="flex-1">
+                {pretty(c.category)} <span className="text-muted">{on ? "· expected" : "· not in role"}</span>
+              </span>
+              <span className="w-[120px]">
+                <span className="inline-block h-2 rounded"
+                  style={{ width: `${Math.min(100, (c.secs / maxSecs) * 100)}%`, background: on ? "#D4AF37" : "#cfcfcf" }} />
+              </span>
+              <b className="w-[46px] text-right">{h(c.secs)}</b>
+            </button>
+            {isOpen && (
+              <div className="ml-7 mt-1 mb-2">
+                {c.children.map((ch) => (
+                  <div key={ch.label} className="flex items-center gap-2 text-[12px] text-muted py-0.5">
+                    <span className="flex-1 truncate" title={ch.label}>{ch.label}</span>
+                    <span className="text-[10px] px-1 rounded bg-[#eee]">{ch.kind}</span>
+                    <b className="w-[46px] text-right text-ink">{h(ch.secs)}</b>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }

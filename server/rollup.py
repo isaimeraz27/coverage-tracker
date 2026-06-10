@@ -39,6 +39,8 @@ def build_ledger(conn, user_fk: int, day: str):
 
     L = engine.DayLedger()
     top: dict[str, float] = {}
+    # nested breakdown: category(sub) -> {"secs", "coarse", "children": {label -> {"secs","kind"}}}
+    bd: dict[str, dict] = {}
     stream: list[dict] = []
     for r in rows:
         a = (r["active_ms"] or 0) / 1000.0
@@ -66,6 +68,7 @@ def build_ledger(conn, user_fk: int, day: str):
         if is_meeting and not is_idle:
             L.meeting_s += a + i
             top["meeting"] = top.get("meeting", 0) + a + i
+            # meeting time is intentionally NOT app/domain-attributed: shows in top, not breakdown
             continue
         if is_idle:
             if i <= short_max:
@@ -89,10 +92,73 @@ def build_ledger(conn, user_fk: int, day: str):
         # tiny in-segment gaps count as forgiven idle
         L.idle_short_s += i
         top[sub] = top.get(sub, 0) + a
+        child_label = r["domain"] or r["app"] or "unknown"
+        child_kind = "domain" if r["domain"] else "app"
+        cat = bd.setdefault(sub, {"secs": 0.0, "coarse": coarse, "children": {}})
+        cat["secs"] += a
+        ch = cat["children"].setdefault(child_label, {"secs": 0.0, "kind": child_kind})
+        ch["secs"] += a
 
     top_sorted = sorted(top.items(), key=lambda kv: kv[1], reverse=True)[:5]
-    extra = {"top": [{"sub": k, "secs": round(v)} for k, v in top_sorted]}
+    breakdown = [
+        {"category": k, "secs": round(v["secs"]), "coarse": v["coarse"],
+         "children": [
+             {"label": lbl, "kind": c["kind"], "secs": round(c["secs"])}
+             for lbl, c in sorted(v["children"].items(), key=lambda kv: kv[1]["secs"], reverse=True)
+         ]}
+        for k, v in sorted(bd.items(), key=lambda kv: kv[1]["secs"], reverse=True)
+    ]
+    extra = {"top": [{"sub": k, "secs": round(v)} for k, v in top_sorted],
+             "breakdown": breakdown}
     return L, extra, stream
+
+
+def hourly_buckets(rows, work_hours: dict, coarse_lookup=None) -> dict:
+    """Aggregate activity rows into per-clock-hour buckets for the person timeline.
+
+    Pure: takes DB rows (ts, sub_category, state, active_ms, idle_ms, is_meeting) and the
+    work-hours window. Buckets by the clock hour of `ts`. Hours OUTSIDE the work window that
+    have activity are still included, so odd-hour data is never hidden (the original bug).
+
+    `coarse_lookup` is an optional callable `sub_category -> coarse_string` used to classify
+    productive-vs-distracting. When provided (e.g. db.coarse_for bound to a conn), it is the
+    AUTHORITATIVE source — matching build_ledger/the breakdown so the bar chart agrees with
+    the data beside it. When None, falls back to the static C.coarse_of seed (keeps the pure
+    tests working). Both paths compare on the string class value.
+    """
+    ws = work_hours.get("work_start", 8)
+    we = work_hours.get("work_end", 18)
+    buckets: dict[int, dict] = {}
+
+    def _b(h):
+        return buckets.setdefault(h, {"hour": h, "productive_s": 0, "distracting_s": 0,
+                                      "meeting_s": 0, "idle_s": 0})
+
+    for r in rows:
+        try:
+            t = dt.datetime.fromisoformat(r["ts"])
+        except (ValueError, TypeError):
+            continue
+        h = t.hour
+        active = (r["active_ms"] or 0) / 1000.0
+        idle = (r["idle_ms"] or 0) / 1000.0
+        if r["is_meeting"] and r["state"] != C.ActivityState.IDLE.value:
+            _b(h)["meeting_s"] += round(active + idle)
+        elif r["state"] == C.ActivityState.IDLE.value:
+            _b(h)["idle_s"] += round(idle)
+        else:
+            if coarse_lookup is not None:
+                coarse = coarse_lookup(r["sub_category"])
+            else:
+                coarse = C.coarse_of(r["sub_category"]).value
+            if coarse == C.CoarseClass.DISTRACTING.value:
+                _b(h)["distracting_s"] += round(active)
+            else:
+                _b(h)["productive_s"] += round(active)
+    for h in range(ws, we):
+        _b(h)
+    hours = [buckets[h] for h in sorted(buckets)]
+    return {"work_start": ws, "work_end": we, "hours": hours}
 
 
 def role_target_score(conn, user_fk: int):

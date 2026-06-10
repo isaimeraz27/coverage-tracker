@@ -125,13 +125,34 @@ export interface Task {
   reopen_count: number;
 }
 
+export interface TimelineHour {
+  hour: number;
+  productive_s: number;
+  distracting_s: number;
+  meeting_s: number;
+  idle_s: number;
+}
+
+export interface BreakdownChild {
+  label: string;
+  kind: "domain" | "app";
+  secs: number;
+}
+
+export interface BreakdownCategory {
+  category: string;
+  secs: number;
+  coarse: string;
+  children: BreakdownChild[];
+}
+
 export interface Person {
   person: { name: string; role: string | null };
   insight: PersonInsight;
   top: { sub: string; secs: number }[];
-  timeline: { l: number; w: number; c: string; t: string }[];
+  timeline: { work_start: number; work_end: number; hours: TimelineHour[] };
   on_task_set: string[];
-  tasks: Task[];
+  breakdown: BreakdownCategory[];
 }
 
 export interface Role {
