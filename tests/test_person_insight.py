@@ -102,6 +102,22 @@ class TestHourlyTimeline(unittest.TestCase):
         self.assertIn(0, by_hour)
         self.assertEqual(by_hour[0]["distracting_s"], 300)
 
+    def test_idle_and_meeting_while_idle_go_to_idle_bucket(self):
+        day = "2026-06-09"
+        # a plain idle row
+        _ev(self.conn, self.uid, day + "T11:00:00+00:00", "", None, "idle", 0, idle_ms=300_000, state="idle")
+        # a row marked meeting BUT in idle state must fall through to idle, not meeting
+        _ev(self.conn, self.uid, day + "T11:30:00+00:00", "zoom", None, "meeting", 0, idle_ms=120_000, state="idle", meeting=1)
+        self.conn.commit()
+        rows = self.conn.execute(
+            "SELECT ts, sub_category, state, active_ms, idle_ms, is_meeting, app, domain "
+            "FROM activity_event WHERE user_fk=? AND substr(ts_norm,1,10)=? ORDER BY ts_norm",
+            (self.uid, day)).fetchall()
+        out = rollup.hourly_buckets(rows, {"work_start": 8, "work_end": 18})
+        by_hour = {h["hour"]: h for h in out["hours"]}
+        self.assertEqual(by_hour[11]["idle_s"], 420)     # 300 + 120
+        self.assertEqual(by_hour[11]["meeting_s"], 0)    # meeting-while-idle did NOT count as meeting
+
     def test_hours_span_covers_work_window_even_when_empty(self):
         out = rollup.hourly_buckets([], {"work_start": 8, "work_end": 12})
         hours = [h["hour"] for h in out["hours"]]

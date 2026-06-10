@@ -120,7 +120,6 @@ def hourly_buckets(rows, work_hours: dict) -> dict:
     work-hours window. Buckets by the clock hour of `ts`. Hours OUTSIDE the work window that
     have activity are still included, so odd-hour data is never hidden (the original bug).
     """
-    import datetime as _dt
     ws = work_hours.get("work_start", 8)
     we = work_hours.get("work_end", 18)
     buckets: dict[int, dict] = {}
@@ -131,7 +130,7 @@ def hourly_buckets(rows, work_hours: dict) -> dict:
 
     for r in rows:
         try:
-            t = _dt.datetime.fromisoformat(r["ts"])
+            t = dt.datetime.fromisoformat(r["ts"])
         except (ValueError, TypeError):
             continue
         h = t.hour
