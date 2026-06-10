@@ -71,5 +71,42 @@ class TestBreakdown(unittest.TestCase):
         self.assertTrue(all(set(t.keys()) == {"sub", "secs"} for t in extra["top"]))
 
 
+class TestHourlyTimeline(unittest.TestCase):
+    def setUp(self):
+        fd, self.path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.conn = db.connect(self.path)
+        db.init_db(self.conn)
+        self.uid = _seed_user(self.conn)
+
+    def tearDown(self):
+        self.conn.close()
+        os.unlink(self.path)
+
+    def test_buckets_by_clock_hour_and_includes_outside_window(self):
+        day = "2026-06-09"
+        _ev(self.conn, self.uid, day + "T09:15:00+00:00", "code", None, "dev_tools", 1800_000)
+        _ev(self.conn, self.uid, day + "T09:40:00+00:00", "zoom", None, "meeting", 600_000, meeting=1)
+        _ev(self.conn, self.uid, day + "T00:18:00+00:00", "msedge", "x.com", "social", 300_000)
+        self.conn.commit()
+        rows = self.conn.execute(
+            "SELECT ts, sub_category, state, active_ms, idle_ms, is_meeting, app, domain "
+            "FROM activity_event WHERE user_fk=? AND substr(ts_norm,1,10)=? ORDER BY ts_norm",
+            (self.uid, day)).fetchall()
+        out = rollup.hourly_buckets(rows, {"work_start": 8, "work_end": 18})
+        self.assertEqual(out["work_start"], 8)
+        self.assertEqual(out["work_end"], 18)
+        by_hour = {h["hour"]: h for h in out["hours"]}
+        self.assertEqual(by_hour[9]["productive_s"], 1800)
+        self.assertEqual(by_hour[9]["meeting_s"], 600)
+        self.assertIn(0, by_hour)
+        self.assertEqual(by_hour[0]["distracting_s"], 300)
+
+    def test_hours_span_covers_work_window_even_when_empty(self):
+        out = rollup.hourly_buckets([], {"work_start": 8, "work_end": 12})
+        hours = [h["hour"] for h in out["hours"]]
+        self.assertEqual(hours, [8, 9, 10, 11])
+
+
 if __name__ == "__main__":
     unittest.main()

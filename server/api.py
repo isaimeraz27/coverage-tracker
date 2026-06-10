@@ -947,29 +947,7 @@ class Handler(BaseHTTPRequestHandler):
             "SELECT ts, sub_category, state, active_ms, idle_ms, is_meeting "
             "FROM activity_event WHERE user_fk=? AND substr(ts_norm,1,10)=? ORDER BY ts_norm",
             (uid, day)).fetchall()
-        WIN = 10 * 3600.0  # 8:00–18:00 work window
-        out = []
-        for r in rows:
-            try:
-                t = dt.datetime.fromisoformat(r["ts"])
-            except ValueError:
-                continue
-            sec = (t.hour - 8) * 3600 + t.minute * 60 + t.second
-            dur = ((r["active_ms"] or 0) + (r["idle_ms"] or 0)) / 1000.0
-            if dur <= 0:
-                continue
-            left = max(0.0, min(100.0, sec / WIN * 100))
-            if r["is_meeting"]:
-                col = "#F4D77A"
-            elif r["state"] == "idle":
-                col = "#cdcdcd"
-            else:
-                coarse = C.coarse_of(r["sub_category"])
-                col = ("#D4AF37" if coarse == C.CoarseClass.PRODUCTIVE
-                       else "rgba(176,0,32,.55)" if coarse == C.CoarseClass.DISTRACTING else "#d8d8d8")
-            out.append({"l": round(left, 2), "w": round(min(100 - left, dur / WIN * 100), 2),
-                        "c": col, "t": f"{r['sub_category']} {dur/60:.0f}m"})
-        return out
+        return rollup.hourly_buckets(rows, db.work_hours(self.conn))
 
     # -- self-serve install --------------------------------------------------- #
     def _serve_install(self, q):

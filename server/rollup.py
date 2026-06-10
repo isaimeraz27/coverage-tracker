@@ -113,6 +113,46 @@ def build_ledger(conn, user_fk: int, day: str):
     return L, extra, stream
 
 
+def hourly_buckets(rows, work_hours: dict) -> dict:
+    """Aggregate activity rows into per-clock-hour buckets for the person timeline.
+
+    Pure: takes DB rows (ts, sub_category, state, active_ms, idle_ms, is_meeting) and the
+    work-hours window. Buckets by the clock hour of `ts`. Hours OUTSIDE the work window that
+    have activity are still included, so odd-hour data is never hidden (the original bug).
+    """
+    import datetime as _dt
+    ws = work_hours.get("work_start", 8)
+    we = work_hours.get("work_end", 18)
+    buckets: dict[int, dict] = {}
+
+    def _b(h):
+        return buckets.setdefault(h, {"hour": h, "productive_s": 0, "distracting_s": 0,
+                                      "meeting_s": 0, "idle_s": 0})
+
+    for r in rows:
+        try:
+            t = _dt.datetime.fromisoformat(r["ts"])
+        except (ValueError, TypeError):
+            continue
+        h = t.hour
+        active = (r["active_ms"] or 0) / 1000.0
+        idle = (r["idle_ms"] or 0) / 1000.0
+        if r["is_meeting"] and r["state"] != C.ActivityState.IDLE.value:
+            _b(h)["meeting_s"] += round(active + idle)
+        elif r["state"] == C.ActivityState.IDLE.value:
+            _b(h)["idle_s"] += round(idle)
+        else:
+            coarse = C.coarse_of(r["sub_category"])
+            if coarse == C.CoarseClass.DISTRACTING:
+                _b(h)["distracting_s"] += round(active)
+            else:
+                _b(h)["productive_s"] += round(active)
+    for h in range(ws, we):
+        _b(h)
+    hours = [buckets[h] for h in sorted(buckets)]
+    return {"work_start": ws, "work_end": we, "hours": hours}
+
+
 def role_target_score(conn, user_fk: int):
     """The user's role target, or None when the role is uncalibrated (§10 #8).
 
