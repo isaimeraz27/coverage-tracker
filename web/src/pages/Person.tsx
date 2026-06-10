@@ -7,6 +7,13 @@ import { ScoreDonut } from "../components/ScoreDonut";
 const h = (s: number) => `${(s / 3600).toFixed(1)}h`;
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
+const TL_COLORS = {
+  productive: "#D4AF37",
+  meeting: "#F4D77A",
+  distracting: "rgba(176,0,32,.55)",
+  idle: "#cdcdcd",
+} as const;
+
 export function PersonPage() {
   const { uid } = useParams();
   const [sp] = useSearchParams();
@@ -95,7 +102,7 @@ export function PersonPage() {
           <Row label="Meeting" value={h(ins.meeting_s)} />
           <Row label="Idle (long)" value={h(ins.idle_long_s)} />
         </div>
-        <CategoryBreakdown breakdown={data.breakdown} onTask={data.on_task_set} />
+        <CategoryBreakdown key={day} breakdown={data.breakdown} onTask={data.on_task_set} />
       </div>
 
       <div className="card mt-4">
@@ -184,10 +191,10 @@ function HourlyTimeline({ tl }: { tl: Person["timeline"] }) {
                 className="w-full flex flex-col-reverse rounded-sm overflow-hidden bg-[#f4f4f4] h-full"
                 title={`${ampm(hr.hour)} — ${Math.round(total / 60)}m active`}
               >
-                {seg(hr.productive_s, "#D4AF37", "p")}
-                {seg(hr.meeting_s, "#F4D77A", "m")}
-                {seg(hr.distracting_s, "rgba(176,0,32,.55)", "d")}
-                {seg(hr.idle_s, "#cdcdcd", "i")}
+                {seg(hr.productive_s, TL_COLORS.productive, "p")}
+                {seg(hr.meeting_s, TL_COLORS.meeting, "m")}
+                {seg(hr.distracting_s, TL_COLORS.distracting, "d")}
+                {seg(hr.idle_s, TL_COLORS.idle, "i")}
               </div>
               <span className="text-[10px] text-muted mt-1">{ampm(hr.hour)}</span>
             </div>
@@ -195,10 +202,10 @@ function HourlyTimeline({ tl }: { tl: Person["timeline"] }) {
         })}
       </div>
       <div className="flex gap-3 mt-2 text-[11px] text-muted">
-        <Legend c="#D4AF37" t="productive" />
-        <Legend c="#F4D77A" t="meeting" />
-        <Legend c="rgba(176,0,32,.55)" t="distracting" />
-        <Legend c="#cdcdcd" t="idle" />
+        <Legend c={TL_COLORS.productive} t="productive" />
+        <Legend c={TL_COLORS.meeting} t="meeting" />
+        <Legend c={TL_COLORS.distracting} t="distracting" />
+        <Legend c={TL_COLORS.idle} t="idle" />
       </div>
     </div>
   );
@@ -218,7 +225,6 @@ function CategoryBreakdown({
   const [open, setOpen] = useState<Set<string>>(new Set());
   const pretty = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
   const maxSecs = breakdown[0]?.secs || 1;
-  const hrs = (s: number) => `${(s / 3600).toFixed(1)}h`;
   return (
     <div className="card">
       <h3 className="font-serif font-semibold mb-2">Where the hours went</h3>
@@ -248,7 +254,7 @@ function CategoryBreakdown({
                 <span className="inline-block h-2 rounded"
                   style={{ width: `${Math.min(100, (c.secs / maxSecs) * 100)}%`, background: on ? "#D4AF37" : "#cfcfcf" }} />
               </span>
-              <b className="w-[46px] text-right">{hrs(c.secs)}</b>
+              <b className="w-[46px] text-right">{h(c.secs)}</b>
             </button>
             {isOpen && (
               <div className="ml-7 mt-1 mb-2">
@@ -256,7 +262,7 @@ function CategoryBreakdown({
                   <div key={ch.label} className="flex items-center gap-2 text-[12px] text-muted py-0.5">
                     <span className="flex-1 truncate" title={ch.label}>{ch.label}</span>
                     <span className="text-[10px] px-1 rounded bg-[#eee]">{ch.kind}</span>
-                    <b className="w-[46px] text-right text-ink">{hrs(ch.secs)}</b>
+                    <b className="w-[46px] text-right text-ink">{h(ch.secs)}</b>
                   </div>
                 ))}
               </div>
