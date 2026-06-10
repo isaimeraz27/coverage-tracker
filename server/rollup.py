@@ -39,6 +39,8 @@ def build_ledger(conn, user_fk: int, day: str):
 
     L = engine.DayLedger()
     top: dict[str, float] = {}
+    # nested breakdown: category(sub) -> {"secs", "coarse", "children": {label -> {"secs","kind"}}}
+    bd: dict[str, dict] = {}
     stream: list[dict] = []
     for r in rows:
         a = (r["active_ms"] or 0) / 1000.0
@@ -89,9 +91,24 @@ def build_ledger(conn, user_fk: int, day: str):
         # tiny in-segment gaps count as forgiven idle
         L.idle_short_s += i
         top[sub] = top.get(sub, 0) + a
+        child_label = r["domain"] or r["app"] or "unknown"
+        child_kind = "domain" if r["domain"] else "app"
+        cat = bd.setdefault(sub, {"secs": 0.0, "coarse": coarse, "children": {}})
+        cat["secs"] += a
+        ch = cat["children"].setdefault(child_label, {"secs": 0.0, "kind": child_kind})
+        ch["secs"] += a
 
     top_sorted = sorted(top.items(), key=lambda kv: kv[1], reverse=True)[:5]
-    extra = {"top": [{"sub": k, "secs": round(v)} for k, v in top_sorted]}
+    breakdown = [
+        {"category": k, "secs": round(v["secs"]), "coarse": v["coarse"],
+         "children": [
+             {"label": lbl, "kind": c["kind"], "secs": round(c["secs"])}
+             for lbl, c in sorted(v["children"].items(), key=lambda kv: kv[1]["secs"], reverse=True)
+         ]}
+        for k, v in sorted(bd.items(), key=lambda kv: kv[1]["secs"], reverse=True)
+    ]
+    extra = {"top": [{"sub": k, "secs": round(v)} for k, v in top_sorted],
+             "breakdown": breakdown}
     return L, extra, stream
 
 
