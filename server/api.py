@@ -337,13 +337,13 @@ class Handler(BaseHTTPRequestHandler):
             uid = int(q.get("uid", ["0"])[0])
             if not self._can_see(mgr, uid):
                 return self._json(403, {"error": "forbidden"})
-            person, ins_d, top, timeline, on_task, tasks = self._person(uid, day)
+            person, ins_d, top, timeline, on_task, breakdown = self._person(uid, day)
             if person is None:
                 return self._json(404, {"error": "no such user"})
             db.audit(self.conn, mgr.get("id"), "view_person", uid, f"day={day}")
             return self._json(200, {"person": person, "insight": ins_d, "top": top,
                                     "timeline": timeline, "on_task_set": sorted(on_task),
-                                    "tasks": tasks})
+                                    "breakdown": breakdown})
 
         if u.path == "/api/v1/settings":
             if not self._require_admin():
@@ -899,6 +899,7 @@ class Handler(BaseHTTPRequestHandler):
             hist.append(ins)
         return engine.attention_with_persistence(hist)
 
+    # UNUSED: kept for potential revival (workflow nudge unwired from person page, 2026-06-09).
     def _incomplete_workflow_nudge(self, uid, day):
         """Coaching-only: a producer who STARTS quote workflows but doesn't complete them
         (e.g. never saves to the AMS) on >=3 of the last 5 days. A single incomplete day is
@@ -931,16 +932,8 @@ class Handler(BaseHTTPRequestHandler):
         person = {"name": usr["display_name"] or usr["username"], "role": usr["role"]}
         on_task = db.role_on_task_set(self.conn, usr["role_fk"])
         ins_d = present_insight(self.conn, ins, extra, user_fk=uid, day=day)
-        # Persistent incomplete-workflow coaching nudge (info-only; never a verdict).
-        nudge = self._incomplete_workflow_nudge(uid, day)
-        if nudge:
-            tmpls = ", ".join(t.replace("_", " ") for t in nudge["templates"])
-            ins_d["flags"] = list(ins_d.get("flags", [])) + [{
-                "code": "incomplete_workflow_streak", "severity": "info", "positive": False,
-                "message": f"Started but didn't complete {tmpls} on {nudge['days']} of the last 5 days — worth a check-in",
-            }]
         return (person, ins_d, extra.get("top", []), self._person_timeline(uid, day),
-                on_task, extra.get("tasks", []))
+                on_task, extra.get("breakdown", []))
 
     def _person_timeline(self, uid, day):
         rows = self.conn.execute(

@@ -1,12 +1,15 @@
 """Person-page data: nested category breakdown + hourly timeline buckets."""
 import os
 import sys
+import json
+import threading
 import tempfile
 import unittest
+import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from server import db, rollup  # noqa: E402
+from server import api, db, rollup  # noqa: E402
 from shared import contracts as C  # noqa: E402
 
 
@@ -122,6 +125,54 @@ class TestHourlyTimeline(unittest.TestCase):
         out = rollup.hourly_buckets([], {"work_start": 8, "work_end": 12})
         hours = [h["hour"] for h in out["hours"]]
         self.assertEqual(hours, [8, 9, 10, 11])
+
+
+class TestPersonPayload(unittest.TestCase):
+    """The person HTTP payload exposes `breakdown`, drops `tasks`, and serves the
+    hourly-timeline dict — verified against a live server with a logged-in admin."""
+
+    def setUp(self):
+        fd, self.path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        pre = db.connect(self.path)
+        db.init_db(pre)
+        pre.close()
+        self.srv = api.make_server(0, self.path)
+        self.port = self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self.port}"
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+        os.unlink(self.path)
+
+    def _setup_admin(self):
+        """First-run bootstrap: create the admin and return the session cookie."""
+        req = urllib.request.Request(
+            self.url + "/api/v1/setup-admin",
+            data=json.dumps({"username": "boss", "password": "pw"}).encode(),
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req) as r:
+            cookie = r.headers.get("Set-Cookie", "")
+        return cookie.split(";")[0]  # "sid=..."
+
+    def test_person_payload_exposes_breakdown_and_drops_tasks(self):
+        cookie = self._setup_admin()
+        day = "2026-06-09"
+        with self.srv.lock:
+            uid = _seed_user(self.srv.conn)
+            _ev(self.srv.conn, uid, day + "T09:00:00+00:00", "code", None, "dev_tools", 900_000)
+            self.srv.conn.commit()
+        req = urllib.request.Request(
+            self.url + f"/api/v1/person?uid={uid}&day={day}",
+            headers={"Cookie": cookie})
+        with urllib.request.urlopen(req) as r:
+            body = json.loads(r.read())
+        self.assertIn("breakdown", body)
+        self.assertNotIn("tasks", body)
+        self.assertIsInstance(body["timeline"], dict)
+        self.assertIn("hours", body["timeline"])
 
 
 if __name__ == "__main__":
