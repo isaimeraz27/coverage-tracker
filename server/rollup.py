@@ -68,6 +68,7 @@ def build_ledger(conn, user_fk: int, day: str):
         if is_meeting and not is_idle:
             L.meeting_s += a + i
             top["meeting"] = top.get("meeting", 0) + a + i
+            # meeting time is intentionally NOT app/domain-attributed: shows in top, not breakdown
             continue
         if is_idle:
             if i <= short_max:

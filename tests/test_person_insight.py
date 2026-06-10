@@ -47,6 +47,7 @@ class TestBreakdown(unittest.TestCase):
         _ev(self.conn, self.uid, day + "T10:00:00+00:00", "code", None, "dev_tools", 900_000)
         self.conn.commit()
         _, extra, _ = rollup.build_ledger(self.conn, self.uid, day)
+        self.assertEqual([c["category"] for c in extra["breakdown"]][0], "work_comms")
         bd = {c["category"]: c for c in extra["breakdown"]}
         self.assertIn("work_comms", bd)
         self.assertIn("dev_tools", bd)
