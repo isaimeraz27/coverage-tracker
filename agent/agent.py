@@ -87,7 +87,15 @@ class Segmenter:
         return out
 
     def flush(self) -> list[dict]:
-        return [self._close()] if self.mode else []
+        """Close the open segment (if any) and return it, leaving the segmenter in a
+        clean state so it can be called repeatedly mid-stream (periodic checkpoint),
+        not only once at exit."""
+        if not self.mode:
+            return []
+        ev = self._close()
+        self.mode = None
+        self.url = None
+        return [ev]
 
     # -- internal ---------------------------------------------------------- #
     def _open(self, sample, sub, is_meeting, mode):
@@ -126,6 +134,13 @@ class Segmenter:
 
 DEFAULT_WH = {"work_start": 8, "work_end": 18, "work_days": [0, 1, 2, 3, 4], "poll_ms": CFG["poll_ms"]}
 
+# Force-close the open segment into the outbox at least this often. Without it, a long
+# single-app focus never emits (a segment only closes on an app/URL change or idle flip),
+# and an abrupt process kill (logoff/shutdown send an UNCATCHABLE terminate on Windows —
+# no graceful flush) loses the whole open segment. Checkpointing bounds that loss and makes
+# data land during steady work. The server's rollup sums the chunks, so granularity is fine.
+SEGMENT_CHECKPOINT_S = 60
+
 
 def within_work_hours(now: dt.datetime, wh: dict) -> bool:
     """Honor the dashboard-set tracking window — day-of-week + start/end hour."""
@@ -146,6 +161,7 @@ def run_agent(server_url: str, token: str, username: str,
                                                subtype=C.AttendanceSubtype.LOGON.value)))
     last = time.time()
     last_cfg = time.time()
+    last_checkpoint = time.time()
     ticks = 0
     print(f"agent running for {username} -> {server_url}  (hours {wh['work_start']}:00–{wh['work_end']}:00)")
     try:
@@ -175,6 +191,12 @@ def run_agent(server_url: str, token: str, username: str,
             except Exception as e:           # one bad tick must never kill the agent
                 log.warning("capture tick failed: %s", e)
             ticks += 1
+            # Periodically checkpoint the open segment so its data lands even during a
+            # long single-app focus and survives an abrupt kill (see SEGMENT_CHECKPOINT_S).
+            if time.time() - last_checkpoint > SEGMENT_CHECKPOINT_S:
+                for ev in seg.flush():
+                    outbox.enqueue(ev)
+                last_checkpoint = time.time()
             if ticks % ship_every == 0:
                 try:
                     _flush(outbox, shipper)

@@ -11,7 +11,9 @@ import time
 
 class Outbox:
     def __init__(self, path: str = "agent_outbox.db"):
-        self.conn = sqlite3.connect(path)
+        # timeout: if a stray second instance ever touches the file, wait rather than
+        # fail the write (a swallowed "database is locked" would silently drop events).
+        self.conn = sqlite3.connect(path, timeout=30)
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS outbox("
             "id INTEGER PRIMARY KEY, client_event_id TEXT UNIQUE, payload TEXT, queued_ts REAL)"

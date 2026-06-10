@@ -38,6 +38,29 @@ class TestSegmenter(unittest.TestCase):
         self.assertTrue(fin[0]["is_meeting"])
         self.assertEqual(fin[0]["sub_category"], "meeting")
 
+    def test_flush_is_reusable_for_periodic_checkpoint(self):
+        """flush() must be safe to call mid-stream, not just once at exit. After
+        checkpointing an open segment, the next feed() opens a FRESH segment and emits
+        no garbage (ts=None) event. This is what lets the runtime flush long single-app
+        sessions so their data lands and survives an abrupt process kill."""
+        seg = Segmenter(idle_gap_s=180)
+        seg.feed(mk("code", 0), 5)
+        seg.feed(mk("code", 0), 5)
+        chunk = seg.flush()                       # checkpoint the open dev_tools segment
+        self.assertEqual(len(chunk), 1)
+        self.assertEqual(chunk[0]["sub_category"], "dev_tools")
+        self.assertEqual(chunk[0]["active_ms"], 10000)
+        self.assertIsNotNone(chunk[0]["ts"])
+        # continuing the SAME app must NOT emit a broken event — a fresh segment opens
+        more = seg.feed(mk("code", 0), 5)
+        self.assertEqual(more, [])
+        # the post-checkpoint segment closes cleanly on the next boundary
+        e = seg.feed(mk("chrome", 0, "github.com"), 5)
+        self.assertEqual(len(e), 1)
+        self.assertEqual(e[0]["sub_category"], "dev_tools")
+        self.assertEqual(e[0]["active_ms"], 5000)   # only the post-checkpoint 5s
+        self.assertIsNotNone(e[0]["ts"])
+
     def test_counts_only_never_content(self):
         seg = Segmenter(idle_gap_s=180)
         seg.feed(mk("code", 0), 5)

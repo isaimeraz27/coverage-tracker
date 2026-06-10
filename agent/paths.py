@@ -17,7 +17,7 @@ import sys
 # Bump on every meaningful agent change so a deployed exe can be identified (printed by
 # `coverage-agent.exe --selftest`). The exe is built out-of-band on Windows, so this is how
 # you confirm which build is actually running on a machine.
-AGENT_VERSION = "0.3.0"
+AGENT_VERSION = "0.4.0"
 
 
 def install_dir() -> str:
