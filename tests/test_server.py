@@ -51,6 +51,16 @@ class TestServer(unittest.TestCase):
         self.assertEqual(wh["work_start"], 9)
         self.assertEqual(wh["work_days"], [0, 1, 2])
 
+    def test_full_url_on_by_default_with_kill_switch(self):
+        # full-URL capture ships ON for a fresh org (no setup step), and the agent's
+        # config reflects it. The setting is still an honored kill-switch.
+        with self.srv.lock:
+            c = self.srv.conn
+            self.assertEqual(db.get_setting(c, "full_url"), "1")     # default ON
+            self.assertTrue(db.work_hours(c)["full_url"])            # reaches the agent
+            db.set_setting(c, "full_url", "0")                       # kill-switch honored
+            self.assertFalse(db.work_hours(c)["full_url"])
+
     def test_self_serve_enroll_and_config(self):
         with self.srv.lock:
             code = auth.issue_enrollment_code(self.srv.conn, machine_id=None, label="Sam")

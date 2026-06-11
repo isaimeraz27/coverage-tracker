@@ -178,7 +178,9 @@ SETTINGS_DEFAULTS = {
     "work_end": "18",
     "work_days": "0,1,2,3,4",   # 0=Mon … 6=Sun  (Python weekday())
     "poll_ms": "5000",
-    "full_url": "0",            # capture full URLs (deep app context); off by default
+    "full_url": "1",            # capture full URLs (deep app context); ON by default —
+                                # admins can disable via the setting (kill-switch retained).
+                                # Sensitive-domain redaction still applies regardless.
     "enroll_password": "coverage-setup",   # employees type this on the setup page
     "org_name": "Coverage Insurance",
     "mode": "coaching",                    # 'coaching' (default) | 'evaluative' — see present_insight()
@@ -278,7 +280,7 @@ def work_hours(conn) -> dict:
         "work_end": int(get_setting(conn, "work_end", "18")),
         "work_days": [int(x) for x in get_setting(conn, "work_days", "0,1,2,3,4").split(",") if x != ""],
         "poll_ms": int(get_setting(conn, "poll_ms", "5000")),
-        "full_url": get_setting(conn, "full_url", "0") in ("1", "true", "True"),
+        "full_url": get_setting(conn, "full_url", "1") in ("1", "true", "True"),
     }
 
 
