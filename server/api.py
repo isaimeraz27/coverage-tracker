@@ -79,7 +79,8 @@ Write-Host 'Coverage agent installed. It runs at each login and tracks only duri
 SESSIONS: dict[str, dict] = {}   # sid -> manager row dict
 # Local viewing convenience: TRACKER_NO_AUTH=1 skips the login gate and treats the
 # viewer as a read-all admin. For local/demo only — never set in production.
-NO_AUTH = bool(os.environ.get("TRACKER_NO_AUTH"))
+# Strict: only the literal "1" enables the bypass; "0", "false", etc. do NOT.
+NO_AUTH = os.environ.get("TRACKER_NO_AUTH") == "1"
 DEV_ADMIN = {"id": None, "username": "local (no-auth)", "role": "admin"}
 AUTO_PROVISION_USERS = True      # machines must enroll; their users auto-provision
 AUTO_PROVISION_MACHINES = False  # §3.1 unknown machine rejected by default
@@ -1056,6 +1057,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def make_server(port: int, db_path: str) -> ThreadingHTTPServer:
+    if NO_AUTH:
+        print("WARNING: authentication is DISABLED (TRACKER_NO_AUTH=1) — never use this in production",
+              file=sys.stderr, flush=True)
     conn = db.connect(db_path, check_same_thread=False)
     db.init_db(conn)
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
