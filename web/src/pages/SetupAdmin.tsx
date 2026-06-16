@@ -29,6 +29,10 @@ export function SetupAdmin() {
       setErr("Username and password are required.");
       return;
     }
+    if (!f.enroll_password.trim() || f.enroll_password.trim() === "coverage-setup") {
+      setErr("Set a non-default setup password (employees type it to enroll). It can't be blank or the default.");
+      return;
+    }
     setBusy(true);
     setErr("");
     try {
@@ -65,6 +69,9 @@ export function SetupAdmin() {
           value={f.enroll_password}
           onChange={up("enroll_password")}
         />
+        <p className="text-[12px] text-muted mt-1 leading-snug">
+          Choose something only your team knows — this is what employees type to enroll a machine.
+        </p>
 
         <div className="mt-4 mb-2">
           <label className="block text-[12px] text-muted mb-1">Starting mode</label>

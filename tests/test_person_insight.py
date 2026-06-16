@@ -165,7 +165,8 @@ class TestPersonPayload(unittest.TestCase):
         """First-run bootstrap: create the admin and return the session cookie."""
         req = urllib.request.Request(
             self.url + "/api/v1/setup-admin",
-            data=json.dumps({"username": "boss", "password": "pw"}).encode(),
+            data=json.dumps({"username": "boss", "password": "pw",
+                             "enroll_password": "team-secret-123"}).encode(),
             headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req) as r:
             cookie = r.headers.get("Set-Cookie", "")

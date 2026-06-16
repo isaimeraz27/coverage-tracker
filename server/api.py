@@ -463,14 +463,20 @@ class Handler(BaseHTTPRequestHandler):
         password = d.get("password") or ""
         if not username or not password:
             return self._json(400, {"error": "username and password required"})
+        # Require a non-default enroll password BEFORE creating any state.
+        # db.SETTINGS_DEFAULTS["enroll_password"] is the public seed ("coverage-setup");
+        # accepting it would let anyone who knows the default self-enroll a rogue machine.
+        enroll_pw = (d.get("enroll_password") or "").strip()
+        if not enroll_pw or enroll_pw == db.SETTINGS_DEFAULTS["enroll_password"]:
+            return self._json(400, {"error": "a non-default setup password is required"})
         row = auth.create_first_admin(self.conn, username, password, d.get("display_name", ""))
         if row is None:
             return self._json(403, {"error": "already set up"})
         # org config from the same form
         if d.get("org_name"):
             db.set_setting(self.conn, "org_name", d["org_name"])
-        if d.get("enroll_password"):
-            db.set_setting(self.conn, "enroll_password", d["enroll_password"])
+        # enroll_pw is validated and guaranteed non-empty/non-default — store unconditionally
+        db.set_setting(self.conn, "enroll_password", enroll_pw)
         mode = d.get("mode", "coaching")
         db.set_setting(self.conn, "mode", mode if mode in ("coaching", "evaluative") else "coaching")
         db.set_setting(self.conn, "first_run_complete", "1")

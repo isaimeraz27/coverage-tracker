@@ -50,7 +50,10 @@ def enroll(conn, code: str, hostname: str = "") -> str | None:
 
 
 def check_enroll_password(conn, pw: str) -> bool:
-    expected = db.get_setting(conn, "enroll_password", "") or ""
+    # Strip both sides: _setup_admin stores the password stripped, so the employee's
+    # input must be normalized the same way or stray whitespace would silently fail.
+    expected = (db.get_setting(conn, "enroll_password", "") or "").strip()
+    pw = (pw or "").strip()
     return bool(pw) and secrets.compare_digest(pw, expected)
 
 

@@ -47,7 +47,8 @@ class TestAdminApi(unittest.TestCase):
     def test_role_calibration_and_enrollment(self):
         # become admin (cookie stored in the jar)
         st, _ = self._req("POST", "/api/v1/setup-admin",
-                          {"username": "root", "password": "pw", "org_name": "Acme"})
+                          {"username": "root", "password": "pw", "org_name": "Acme",
+                           "enroll_password": "team-secret-123"})
         self.assertEqual(st, 200)
 
         # create a calibrated role
