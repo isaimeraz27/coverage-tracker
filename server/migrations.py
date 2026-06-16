@@ -69,6 +69,20 @@ MIGRATIONS = [
           PRIMARY KEY (template_fk, sub_category)
         )"""),
     ]),
+    # v5 — consent/ack paper trail (Ley 1581 §4). One row per enrollment, bound to the
+    # same commit that mints the token. disclosure_version=null means legacy/backward-compat
+    # enroll that did not acknowledge (so already-scripted installs don't break).
+    (5, "ack_record", [
+        (None, None, """
+        CREATE TABLE IF NOT EXISTS ack_record (
+          id                 INTEGER PRIMARY KEY,
+          machine_id         TEXT NOT NULL,
+          hostname           TEXT,
+          disclosure_version INTEGER,            -- null = enrolled without acknowledging (legacy/backward-compat)
+          acknowledged_ts    TEXT NOT NULL
+        )"""),
+        (None, None, "CREATE INDEX IF NOT EXISTS ix_ack_machine ON ack_record(machine_id)"),
+    ]),
 ]
 # NOTE: the `mode` / `first_run_complete` settings keys are not DDL — they are seeded as
 # rows by db.SETTINGS_DEFAULTS in db.init_db, so they need no migration here.

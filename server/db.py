@@ -185,6 +185,13 @@ SETTINGS_DEFAULTS = {
     "org_name": "Coverage Insurance",
     "mode": "coaching",                    # 'coaching' (default) | 'evaluative' — see present_insight()
     "first_run_complete": "0",             # "1" once the first admin + org config is saved
+    "disclosure_text": (
+        "This computer is monitored for work activity during business hours. "
+        "Activity metadata (applications, window titles, visited domains, active/idle time) is recorded. "
+        "Keystroke content, screen contents, webcam, and microphone are NOT captured. "
+        "Data is used for coaching and accountability and retained per policy."
+    ),
+    "disclosure_version": "1",
 }
 
 
@@ -264,6 +271,28 @@ def set_setting(conn, key: str, value: str) -> None:
         "INSERT INTO settings(key, value) VALUES (?,?) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, str(value)))
     conn.commit()
+
+
+def set_disclosure_text(conn, text: str) -> int:
+    """Set disclosure_text and auto-bump disclosure_version when the text changes.
+
+    Both keys are written in ONE commit so the version can never diverge from the
+    text it labels — important since the version is part of the Ley 1581 audit trail.
+    Returns the (possibly unchanged) disclosure_version as an int.
+    """
+    current_text = get_setting(conn, "disclosure_text", "")
+    current_ver = int(get_setting(conn, "disclosure_version", SETTINGS_DEFAULTS["disclosure_version"]))
+    if text != current_text:
+        current_ver += 1
+    conn.execute(
+        "INSERT INTO settings(key, value) VALUES (?,?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value", ("disclosure_text", text))
+    conn.execute(
+        "INSERT INTO settings(key, value) VALUES (?,?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        ("disclosure_version", str(current_ver)))
+    conn.commit()
+    return current_ver
 
 
 def all_settings(conn) -> dict:

@@ -310,6 +310,11 @@ class Handler(BaseHTTPRequestHandler):
                 "first_run_complete": db.get_setting(self.conn, "first_run_complete", "0") == "1",
                 "org_name": db.get_setting(self.conn, "org_name", "Coverage"),
             })
+        if u.path == "/api/v1/disclosure":
+            return self._json(200, {
+                "version": int(db.get_setting(self.conn, "disclosure_version", "1")),
+                "text": db.get_setting(self.conn, "disclosure_text", ""),
+            })
         if u.path == "/api/v1/me":
             mgr = self._session()
             if not mgr:
@@ -544,7 +549,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         d = self._json_body()
         allowed = {"work_start", "work_end", "work_days", "poll_ms", "org_name",
-                   "enroll_password", "mode"}
+                   "enroll_password", "mode", "disclosure_text"}
         for k, v in d.items():
             if k not in allowed:
                 continue
@@ -552,7 +557,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "mode must be coaching|evaluative"})
             if k == "work_days" and isinstance(v, list):
                 v = ",".join(str(x) for x in v)
-            db.set_setting(self.conn, k, str(v))
+            if k == "disclosure_text":
+                # auto-bumps disclosure_version when text changes (§4); version is server-managed
+                db.set_disclosure_text(self.conn, str(v))
+            else:
+                db.set_setting(self.conn, k, str(v))
         db.audit(self.conn, mgr.get("id"), "change_config", None, "settings")
         return self._json(200, db.all_settings(self.conn))
 
@@ -745,7 +754,13 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self._body() or b"{}")
         except json.JSONDecodeError:
             return self._json(400, {"error": "bad json"})
-        token = auth.enroll(self.conn, data.get("code", ""), data.get("hostname", ""))
+        # The install script sends disclosure_version once the employee accepted the
+        # disclosure (§4). We treat its PRESENCE as the acknowledgment signal; the version
+        # actually recorded is the server's own (auth.enroll), never the client's number.
+        dv = data.get("disclosure_version")
+        acknowledged = dv is not None and str(dv).strip() != ""
+        token = auth.enroll(self.conn, data.get("code", ""), data.get("hostname", ""),
+                            acknowledged=acknowledged)
         if not token:
             return self._json(403, {"error": "invalid or used enrollment code"})
         return self._json(200, {"token": token})

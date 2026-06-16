@@ -30,7 +30,7 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def enroll(conn, code: str, hostname: str = "") -> str | None:
+def enroll(conn, code: str, hostname: str = "", acknowledged: bool = False) -> str | None:
     row = conn.execute(
         "SELECT * FROM enrollment_code WHERE code=? AND used=0", (code,)
     ).fetchone()
@@ -45,6 +45,17 @@ def enroll(conn, code: str, hostname: str = "") -> str | None:
     conn.execute("UPDATE machine SET token=?, enrolled_ts=?, revoked=0 WHERE id=?",
                  (hash_token(token), db.now_iso(), mfk))
     conn.execute("UPDATE enrollment_code SET used=1 WHERE code=?", (code,))
+    # Record the consent ack bound to this same token-minting commit (§4), so no token is
+    # ever issued without a recorded ack. We store the SERVER's current disclosure_version
+    # (the text we actually served) — never a client-claimed number, which can't be trusted.
+    # `acknowledged=False` (legacy/old install script that didn't show the disclosure) records
+    # a NULL version so the dashboard can flag it as "not acknowledged".
+    ack_version = int(db.get_setting(conn, "disclosure_version", "1")) if acknowledged else None
+    conn.execute(
+        "INSERT INTO ack_record(machine_id, hostname, disclosure_version, acknowledged_ts) "
+        "VALUES (?,?,?,?)",
+        (machine_id, hostname or None, ack_version, db.now_iso()),
+    )
     conn.commit()
     return token  # raw token returned to agent; only the hash is persisted
 
