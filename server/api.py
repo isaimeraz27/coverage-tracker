@@ -1056,6 +1056,31 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
+# §3.6 retention purge schedule — 24h cycle, first run ~30s after startup
+PURGE_INTERVAL_S = 86400   # 24 hours
+PURGE_INITIAL_DELAY_S = 30  # short delay so the server finishes booting first
+
+
+def run_purge_once(server) -> dict:
+    """Acquire the server lock, run purge_expired, log counts. Never raises."""
+    try:
+        with server.lock:
+            counts = db.purge_expired(server.conn)
+        print(f"retention purge: {counts}", flush=True)
+        return counts
+    except Exception as exc:  # noqa: BLE001
+        print(f"retention purge error (non-fatal): {exc}", file=sys.stderr, flush=True)
+        return {}
+
+
+def _purge_scheduler(server) -> None:
+    """Daemon thread: initial delay, then purge every PURGE_INTERVAL_S."""
+    time.sleep(PURGE_INITIAL_DELAY_S)
+    while True:
+        run_purge_once(server)
+        time.sleep(PURGE_INTERVAL_S)
+
+
 def make_server(port: int, db_path: str) -> ThreadingHTTPServer:
     if NO_AUTH:
         print("WARNING: authentication is DISABLED (TRACKER_NO_AUTH=1) — never use this in production",
@@ -1065,6 +1090,7 @@ def make_server(port: int, db_path: str) -> ThreadingHTTPServer:
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     srv.conn = conn          # type: ignore[attr-defined]
     srv.lock = threading.Lock()  # serialize the shared sqlite conn (§ low volume, <=10 agents)
+    threading.Thread(target=_purge_scheduler, args=(srv,), daemon=True).start()
     return srv
 
 
