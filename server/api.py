@@ -76,7 +76,9 @@ schtasks /Create /TN 'CoverageAgent' /TR ('"' + $Exe + '"') /SC ONLOGON /F | Out
 Start-Process -FilePath $Exe -WindowStyle Hidden
 Write-Host 'Coverage agent installed. It runs at each login and tracks only during business hours.'
 """
-SESSIONS: dict[str, dict] = {}   # sid -> manager row dict
+SESSIONS: dict[str, dict] = {}   # sid -> {"row": <manager row>, "created": ts, "last_seen": ts}
+IDLE_TIMEOUT_S = 12 * 3600      # 12h since last activity
+ABSOLUTE_TIMEOUT_S = 7 * 86400  # 7d since login, regardless of activity
 # Local viewing convenience: TRACKER_NO_AUTH=1 skips the login gate and treats the
 # viewer as a read-all admin. For local/demo only — never set in production.
 # Strict: only the literal "1" enables the bypass; "0", "false", etc. do NOT.
@@ -87,6 +89,11 @@ AUTO_PROVISION_MACHINES = False  # §3.1 unknown machine rejected by default
 # DORMANT capability — single source of truth is the documented config key (off by default).
 # Re-enable per-role only with legal sign-off.
 SCREENSHOTS_ENABLED = bool(C.CONFIG_DEFAULTS.get("screenshots.enabled", False))
+
+
+def _now() -> float:
+    """Return current epoch seconds. Monkeypatchable by tests to avoid real sleeps."""
+    return time.time()
 
 
 def insight_dict(ins) -> dict:
@@ -195,9 +202,16 @@ class Handler(BaseHTTPRequestHandler):
         cookie = self.headers.get("Cookie", "")
         for part in cookie.split(";"):
             if part.strip().startswith("sid="):
-                s = SESSIONS.get(part.strip()[4:])
-                if s:
-                    return s
+                sid = part.strip()[4:]
+                entry = SESSIONS.get(sid)
+                if entry:
+                    now = _now()
+                    if (now - entry["last_seen"] > IDLE_TIMEOUT_S
+                            or now - entry["created"] > ABSOLUTE_TIMEOUT_S):
+                        SESSIONS.pop(sid, None)
+                        break  # expired — fall through to NO_AUTH/None
+                    entry["last_seen"] = now
+                    return entry["row"]
         return DEV_ADMIN if NO_AUTH else None
 
     def _json_body(self) -> dict:
@@ -451,7 +465,8 @@ class Handler(BaseHTTPRequestHandler):
     # -- auth / bootstrap (JSON, for the React SPA) ------------------------- #
     def _new_session(self, row) -> str:
         sid = secrets.token_hex(16)
-        SESSIONS[sid] = dict(row)
+        now = _now()
+        SESSIONS[sid] = {"row": dict(row), "created": now, "last_seen": now}
         return sid
 
     def _setup_admin(self):
@@ -486,11 +501,12 @@ class Handler(BaseHTTPRequestHandler):
     def _json_with_session(self, code, obj, row):
         """Emit a JSON response that also opens a new manager session via Set-Cookie."""
         sid = self._new_session(row)
+        secure = "; Secure" if self.headers.get("X-Forwarded-Proto", "http") == "https" else ""
         data = json.dumps(obj).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Set-Cookie", f"sid={sid}; HttpOnly; Path=/; SameSite=Lax")
+        self.send_header("Set-Cookie", f"sid={sid}; HttpOnly; Path=/; SameSite=Lax{secure}")
         self.end_headers()
         self.wfile.write(data)
 
@@ -523,7 +539,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"ok": True})
 
     def _settings_put(self):
-        if not self._require_admin():
+        mgr = self._require_admin()
+        if not mgr:
             return
         d = self._json_body()
         allowed = {"work_start", "work_end", "work_days", "poll_ms", "org_name",
@@ -536,7 +553,7 @@ class Handler(BaseHTTPRequestHandler):
             if k == "work_days" and isinstance(v, list):
                 v = ",".join(str(x) for x in v)
             db.set_setting(self.conn, k, str(v))
-        db.audit(self.conn, self._session().get("id"), "change_config", None, "settings")
+        db.audit(self.conn, mgr.get("id"), "change_config", None, "settings")
         return self._json(200, db.all_settings(self.conn))
 
     # -- admin writes ------------------------------------------------------- #
