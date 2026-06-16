@@ -189,6 +189,8 @@ export interface MachineRow {
   revoked: number;
   enrolled_ts: string | null;
   last_seen_ts: string | null;
+  consent_version: number | null;
+  consented_ts: string | null;
 }
 
 export interface Settings {

@@ -94,6 +94,25 @@ class TestServer(unittest.TestCase):
         _, zipb = self._get("/download/agent.zip")
         self.assertEqual(zipb[:2], b"PK")  # zip magic number
 
+    def test_install_consent_gate_present(self):
+        # §4-B: the install script must contain the disclosure fetch, the exact consent
+        # prompt phrase, a cancel path, and the disclosure_version in the config write.
+        _, script = self._get("/install.ps1?code=abc123")
+        # disclosure fetch uses our own server origin
+        self.assertIn(b"/api/v1/disclosure", script)
+        # exact prompt phrase per the spec
+        self.assertIn(b"Type 'I agree' to consent to monitoring and continue", script)
+        # cancel path present
+        self.assertIn(b"cancelled", script)
+        # the consent match is case-sensitive (locks in -cne; a switch to -ne would regress)
+        self.assertIn(b"-cne 'I agree'", script)
+        # disclosure_version written into config.json
+        self.assertIn(b"disclosure_version", script)
+        # existing assertions still hold after the gate was added
+        self.assertIn(b"CoverageAgent", script)
+        self.assertIn(b"/download/agent.exe", script)
+        self.assertIn(b"abc123", script)
+
     def test_install_ignores_attacker_server_param(self):
         # SECURITY: a crafted ?server= must NOT be reflected into the script. The installer
         # downloads + runs an .exe from $Server, so honoring it would be phishing-to-RCE.
@@ -128,6 +147,91 @@ class TestServer(unittest.TestCase):
         finally:
             _api.AGENT_EXE = orig
             os.unlink(exe)
+
+
+class TestMachinesConsentSurface(unittest.TestCase):
+    """§4-B: GET /api/v1/admin/machines returns consent_version + consented_ts per machine."""
+
+    def setUp(self):
+        fd, self.path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        pre = db.connect(self.path)
+        db.init_db(pre)
+        pre.close()
+        self.srv = api.make_server(0, self.path)
+        self.port = self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self.port}"
+        # admin cookie jar
+        import http.cookiejar
+        self.jar = http.cookiejar.CookieJar()
+        self.opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(self.jar))
+        self._setup_admin()
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+        os.unlink(self.path)
+
+    def _setup_admin(self):
+        req = urllib.request.Request(
+            self.url + "/api/v1/setup-admin",
+            data=json.dumps({
+                "username": "root", "password": "pw",
+                "enroll_password": "team-secret-2",
+            }).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with self.opener.open(req) as r:
+            body = json.loads(r.read())
+        assert body["role"] == "admin"
+
+    def _post_json(self, path, obj):
+        req = urllib.request.Request(
+            self.url + path,
+            data=json.dumps(obj).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"{}")
+
+    def _get_machines(self):
+        req = urllib.request.Request(self.url + "/api/v1/admin/machines")
+        with self.opener.open(req) as r:
+            return json.loads(r.read())["machines"]
+
+    def test_acknowledged_enroll_surfaces_consent_version_on_machines(self):
+        """An enroll that includes disclosure_version surfaces consent_version on /machines."""
+        with self.srv.lock:
+            code = auth.issue_enrollment_code(self.srv.conn, machine_id=None, label="test-ack")
+        st, body = self._post_json("/api/v1/enroll", {
+            "code": code, "hostname": "WS-ACK-01", "disclosure_version": 1,
+        })
+        self.assertEqual(st, 200)
+        machines = self._get_machines()
+        m = next((x for x in machines if x["hostname"] == "WS-ACK-01"), None)
+        self.assertIsNotNone(m, "enrolled machine must appear in /machines")
+        self.assertIsNotNone(m["consent_version"],
+                             "consent_version must be set for an acknowledged enroll")
+        self.assertIsNotNone(m["consented_ts"])
+
+    def test_legacy_enroll_without_disclosure_version_shows_null_consent(self):
+        """An enroll without disclosure_version shows null consent_version on /machines."""
+        with self.srv.lock:
+            code = auth.issue_enrollment_code(self.srv.conn, machine_id=None, label="test-legacy")
+        st, body = self._post_json("/api/v1/enroll", {
+            "code": code, "hostname": "WS-LEGACY-01",
+        })
+        self.assertEqual(st, 200)
+        machines = self._get_machines()
+        m = next((x for x in machines if x["hostname"] == "WS-LEGACY-01"), None)
+        self.assertIsNotNone(m, "enrolled machine must appear in /machines")
+        self.assertIsNone(m["consent_version"],
+                          "consent_version must be null for a legacy enroll without disclosure_version")
 
 
 if __name__ == "__main__":

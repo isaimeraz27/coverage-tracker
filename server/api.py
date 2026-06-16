@@ -66,10 +66,25 @@ $Code   = '__CODE__'
 $Dir = Join-Path $env:LOCALAPPDATA 'CoverageAgent'
 New-Item -ItemType Directory -Force -Path $Dir | Out-Null
 $Exe = Join-Path $Dir 'coverage-agent.exe'
+# Fetch the current disclosure notice and require explicit consent before installing.
+# Note: if the server is unreachable, Invoke-RestMethod throws and $ErrorActionPreference='Stop'
+# halts the script here — no consent shown means no install (fail-safe).
+$Disc = Invoke-RestMethod -Uri "$Server/api/v1/disclosure"
+# -Object forces the text to be a positional value (a disclosure starting with '-' would
+# otherwise be parsed as a Write-Host switch). ASCII-only punctuation below for old code pages.
+Write-Host -Object $Disc.text
+Write-Host ''
+$Consent = Read-Host "Type 'I agree' to consent to monitoring and continue (anything else cancels)"
+if ($Consent.Trim() -cne 'I agree') {
+    # exit (not just return) terminates the powershell.exe process even under irm | iex.
+    Write-Host 'Installation cancelled - consent was not given. (Type exactly: I agree)'
+    exit 1
+}
 Write-Host 'Downloading Coverage agent...'
 Invoke-WebRequest -Uri "$Server/download/agent.exe" -OutFile $Exe
 # config.json (next to the exe) carries the server URL + enrollment code the agent reads.
-(@{ server = $Server; code = $Code } | ConvertTo-Json) | Set-Content -Path (Join-Path $Dir 'config.json')
+# disclosure_version is included so the agent passes it on enroll, recording the ack.
+(@{ server = $Server; code = $Code; disclosure_version = $Disc.version } | ConvertTo-Json) | Set-Content -Path (Join-Path $Dir 'config.json')
 # run at every logon as the current user (no admin needed)
 schtasks /Create /TN 'CoverageAgent' /TR ('"' + $Exe + '"') /SC ONLOGON /F | Out-Null
 # start now, hidden (a console exe started hidden shows no window)
@@ -421,8 +436,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"managers": out})
         if path == "/api/v1/admin/machines":
             rows = self.conn.execute(
-                "SELECT machine_id, hostname, revoked, enrolled_ts, last_seen_ts FROM machine "
-                "ORDER BY machine_id").fetchall()
+                "SELECT m.machine_id, m.hostname, m.revoked, m.enrolled_ts, m.last_seen_ts, "
+                "  a.disclosure_version AS consent_version, a.acknowledged_ts AS consented_ts "
+                "FROM machine m "
+                "LEFT JOIN ack_record a ON a.id = ("
+                "  SELECT id FROM ack_record WHERE machine_id = m.machine_id "
+                "  ORDER BY acknowledged_ts DESC, id DESC LIMIT 1) "
+                "ORDER BY m.machine_id").fetchall()
             return self._json(200, {"machines": [dict(r) for r in rows]})
         if path == "/api/v1/admin/taxonomy-rules":
             rows = self.conn.execute(

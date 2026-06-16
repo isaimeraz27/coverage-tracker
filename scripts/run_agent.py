@@ -85,7 +85,7 @@ def main():
         token = open(TOKEN_FILE).read().strip()
     if not token:
         code = os.environ.get("TRACKER_ENROLL_CODE") or cfg.get("code", "")
-        token = shipper.enroll(server, code, _hostname())
+        token = shipper.enroll(server, code, _hostname(), disclosure_version=cfg.get("disclosure_version"))
         if not token:
             print("enrollment failed — check the setup code / server URL")
             sys.exit(1)

@@ -71,6 +71,13 @@ export function Machines() {
                 <div className="text-[11px] text-muted">
                   last seen {m.last_seen_ts ? new Date(m.last_seen_ts).toLocaleString() : "never"}
                 </div>
+                {m.consent_version != null && m.consented_ts ? (
+                  <div className="text-[11px] text-muted">
+                    ✓ consented v{m.consent_version} · {new Date(m.consented_ts).toLocaleDateString()}
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-danger">not acknowledged</div>
+                )}
               </div>
               {m.revoked ? (
                 <span className="text-[12px] text-danger">revoked</span>

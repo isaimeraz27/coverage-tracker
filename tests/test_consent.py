@@ -263,6 +263,46 @@ class TestConsentHttp(unittest.TestCase):
         self.assertEqual(disc_after["version"], ver_before,
                          "disclosure_version must not be settable by the client")
 
+    # -- Seam: the full enroll -> hashed-token verify -> ack -> visible-on-/machines chain -- #
+
+    def test_enroll_hash_ack_machines_roundtrip(self):
+        """Cross-cutting seam (§3a token-hash × §4 consent): one acknowledged enroll must
+        (a) mint a raw token that verify_agent_token resolves against the STORED HASH,
+        (b) record a consent ack in the same commit, and
+        (c) surface that consent on the admin /machines view — all from one enroll."""
+        with self.srv.lock:
+            code = auth.issue_enrollment_code(self.srv.conn, machine_id=None, label="host-rt")
+
+        st, body = self._post_json("/api/v1/enroll", {
+            "code": code, "hostname": "host-rt", "disclosure_version": 1,
+        })
+        self.assertEqual(st, 200)
+        raw_token = body["token"]
+        self.assertTrue(raw_token.startswith("eat_"))
+
+        with self.srv.lock:
+            # (a) §3a: the raw token verifies, and what's stored is the hash, not the raw.
+            mfk = auth.verify_agent_token(self.srv.conn, raw_token)
+            self.assertIsNotNone(mfk, "freshly enrolled raw token must verify (hash path)")
+            stored = self.srv.conn.execute(
+                "SELECT token, machine_id FROM machine WHERE id=?", (mfk,)).fetchone()
+            self.assertEqual(stored["token"], auth.hash_token(raw_token))
+            self.assertNotEqual(stored["token"], raw_token)
+            # (b) §4: an ack row was written for this machine in the same enroll.
+            ack = self.srv.conn.execute(
+                "SELECT disclosure_version FROM ack_record WHERE machine_id=?",
+                (stored["machine_id"],)).fetchone()
+            self.assertIsNotNone(ack, "enroll must record an ack in the same commit")
+            self.assertEqual(ack["disclosure_version"], 1)
+
+        # (c) the admin /machines view surfaces the consent (authenticated GET via the cookie jar).
+        with self.opener.open(self.url + "/api/v1/admin/machines") as r:
+            machines = json.loads(r.read())["machines"]
+        row = next((m for m in machines if m["hostname"] == "host-rt"), None)
+        self.assertIsNotNone(row, "enrolled machine must appear on /machines")
+        self.assertEqual(row["consent_version"], 1)
+        self.assertIsNotNone(row["consented_ts"])
+
 
 if __name__ == "__main__":
     unittest.main()

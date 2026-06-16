@@ -19,8 +19,11 @@ def get_config(server_url: str, token: str) -> dict | None:
         return None
 
 
-def enroll(server_url: str, code: str, hostname: str) -> str | None:
-    body = json.dumps({"code": code, "hostname": hostname}).encode()
+def enroll(server_url: str, code: str, hostname: str, disclosure_version=None) -> str | None:
+    payload = {"code": code, "hostname": hostname}
+    if disclosure_version is not None:
+        payload["disclosure_version"] = disclosure_version
+    body = json.dumps(payload).encode()
     req = urllib.request.Request(server_url.rstrip("/") + "/api/v1/enroll",
                                  data=body, headers={"Content-Type": "application/json"})
     try:
