@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS machine (
   id            INTEGER PRIMARY KEY,
   machine_id    TEXT UNIQUE NOT NULL,          -- wire id (lowercased hostname/guid)
   hostname      TEXT,
-  token         TEXT,                          -- eat_<machine_id>_<rand>
+  token         TEXT,                          -- sha256 of eat_<machine_id>_<rand>; raw goes to the agent only
   revoked       INTEGER NOT NULL DEFAULT 0,
   enrolled_ts   TEXT,
   last_seen_ts  TEXT,

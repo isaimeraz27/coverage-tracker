@@ -25,6 +25,11 @@ def issue_enrollment_code(conn, machine_id: str | None = None, label: str = "") 
     return code
 
 
+def hash_token(token: str) -> str:
+    """Return sha256 hex digest of *token* (64 lowercase hex chars)."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 def enroll(conn, code: str, hostname: str = "") -> str | None:
     row = conn.execute(
         "SELECT * FROM enrollment_code WHERE code=? AND used=0", (code,)
@@ -38,10 +43,10 @@ def enroll(conn, code: str, hostname: str = "") -> str | None:
     mfk = db.resolve_machine(conn, machine_id, auto_provision=True, hostname=hostname)
     token = C.make_agent_token(machine_id)
     conn.execute("UPDATE machine SET token=?, enrolled_ts=?, revoked=0 WHERE id=?",
-                 (token, db.now_iso(), mfk))
+                 (hash_token(token), db.now_iso(), mfk))
     conn.execute("UPDATE enrollment_code SET used=1 WHERE code=?", (code,))
     conn.commit()
-    return token
+    return token  # raw token returned to agent; only the hash is persisted
 
 
 def check_enroll_password(conn, pw: str) -> bool:
@@ -52,10 +57,28 @@ def check_enroll_password(conn, pw: str) -> bool:
 def verify_agent_token(conn, token: str) -> int | None:
     if not token:
         return None
+    h = hash_token(token)
+    # Normal path: stored value is already a sha256 hash.
+    row = conn.execute(
+        "SELECT id FROM machine WHERE token=? AND revoked=0", (h,)
+    ).fetchone()
+    if row:
+        return row["id"]
+    # Legacy path: row was enrolled before hashing was introduced (plaintext stored).
+    # Gate on the raw-token prefix so a *stored hash* (64-hex, never eat_-prefixed) can
+    # never be replayed as a bearer token by anyone who read the DB — which would both
+    # authenticate them and corrupt the row via the upgrade below. Only genuine raw
+    # tokens reach the fallback; accept, upgrade the row in place, then return the id.
+    if not token.startswith(C.TOKEN_PREFIX):
+        return None
     row = conn.execute(
         "SELECT id FROM machine WHERE token=? AND revoked=0", (token,)
     ).fetchone()
-    return row["id"] if row else None
+    if row:
+        conn.execute("UPDATE machine SET token=? WHERE id=?", (h, row["id"]))
+        conn.commit()
+        return row["id"]
+    return None
 
 
 def revoke_machine(conn, machine_id: str) -> None:
