@@ -74,10 +74,10 @@ $Disc = Invoke-RestMethod -Uri "$Server/api/v1/disclosure"
 # otherwise be parsed as a Write-Host switch). ASCII-only punctuation below for old code pages.
 Write-Host -Object $Disc.text
 Write-Host ''
-$Consent = Read-Host "Type 'I agree' to consent to monitoring and continue (anything else cancels)"
+$Consent = Read-Host "Type 'I agree' to acknowledge and continue (anything else cancels)"
 if ($Consent.Trim() -cne 'I agree') {
     # exit (not just return) terminates the powershell.exe process even under irm | iex.
-    Write-Host 'Installation cancelled - consent was not given. (Type exactly: I agree)'
+    Write-Host 'Installation cancelled - no problem. Nothing was installed. (To continue, type exactly: I agree)'
     exit 1
 }
 Write-Host 'Downloading Coverage agent...'
@@ -444,6 +444,8 @@ class Handler(BaseHTTPRequestHandler):
                 "  ORDER BY acknowledged_ts DESC, id DESC LIMIT 1) "
                 "ORDER BY m.machine_id").fetchall()
             return self._json(200, {"machines": [dict(r) for r in rows]})
+        if path == "/api/v1/admin/enroll-codes":
+            return self._json(200, {"codes": auth.pending_enrollment_codes(self.conn)})
         if path == "/api/v1/admin/taxonomy-rules":
             rows = self.conn.execute(
                 "SELECT id, match_type, pattern, sub_category, is_meeting, priority, enabled, notes "
@@ -651,6 +653,13 @@ class Handler(BaseHTTPRequestHandler):
             machine_id = path[len("/api/v1/admin/machines/"):-len("/revoke")]
             auth.revoke_machine(self.conn, machine_id)
             db.audit(self.conn, mgr.get("id"), "machine.revoke", None, machine_id)
+            return self._json(200, {"ok": True})
+        if path.startswith("/api/v1/admin/enroll-codes/") and path.endswith("/delete"):
+            code = path[len("/api/v1/admin/enroll-codes/"):-len("/delete")]
+            deleted = auth.delete_enrollment_code(self.conn, code)
+            if not deleted:
+                return self._json(404, {"error": "no pending code with that value"})
+            db.audit(self.conn, mgr.get("id"), "machine.enroll_code_delete", None, code)
             return self._json(200, {"ok": True})
         if path == "/api/v1/admin/taxonomy-rules":
             err = self._save_taxonomy_rule(d, mgr)

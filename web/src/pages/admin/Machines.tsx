@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
-import { api, MachineRow } from "../../lib/api";
+import { api, MachineRow, PendingCode } from "../../lib/api";
 import { Masthead } from "../../components/Masthead";
 
 export function Machines() {
   const [machines, setMachines] = useState<MachineRow[]>([]);
+  const [codes, setCodes] = useState<PendingCode[]>([]);
   const [label, setLabel] = useState("");
   const [issued, setIssued] = useState<{ code: string; one_liner: string } | null>(null);
 
   async function load() {
     setMachines((await api.machines()).machines);
+    setCodes((await api.pendingCodes()).codes);
   }
   useEffect(() => {
     load();
@@ -17,12 +19,20 @@ export function Machines() {
   async function issue() {
     setIssued(await api.enrollCode({ label }));
     setLabel("");
+    setCodes((await api.pendingCodes()).codes);
   }
 
   async function revoke(id: string) {
     if (!confirm(`Revoke ${id}? Its agent stops being accepted immediately.`)) return;
     await api.revokeMachine(id);
     load();
+  }
+
+  async function deleteCode(code: string, codeLabel: string | null) {
+    if (!confirm(`Delete the unused enrollment code for "${codeLabel || code}"? It can no longer be used to install.`))
+      return;
+    await api.deleteCode(code);
+    setCodes((await api.pendingCodes()).codes);
   }
 
   return (
@@ -61,6 +71,36 @@ export function Machines() {
             </div>
           )}
         </div>
+
+        {codes.length > 0 && (
+          <div className="card mb-4">
+            <h3 className="font-serif font-semibold mb-2">Pending codes</h3>
+            <p className="text-muted text-[12px] mb-2">
+              Issued but not yet used to install. Delete any you issued by mistake.
+            </p>
+            <div className="grid gap-2">
+              {codes.map((c) => (
+                <div key={c.code} className="flex items-center gap-3 text-[13px]">
+                  <div className="flex-1">
+                    <b>{c.label || "(no label)"}</b>
+                    <code className="text-[11px] text-muted ml-2 break-all">{c.code}</code>
+                    {c.created_ts && (
+                      <span className="text-[11px] text-muted ml-2">
+                        · {new Date(c.created_ts).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    className="text-[12px] text-danger font-semibold"
+                    onClick={() => deleteCode(c.code, c.label)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="grid gap-2">
           {machines.map((m) => (

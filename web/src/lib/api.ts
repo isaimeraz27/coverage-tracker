@@ -193,6 +193,13 @@ export interface MachineRow {
   consented_ts: string | null;
 }
 
+export interface PendingCode {
+  code: string;
+  label: string | null;
+  machine_id: string | null;
+  created_ts: string | null;
+}
+
 export interface Settings {
   work_start: string;
   work_end: string;
@@ -318,6 +325,10 @@ export const api = {
     req<{ code: string; install_url: string; one_liner: string }>("POST", "/api/v1/admin/enroll-code", b),
   revokeMachine: (machine_id: string) =>
     req<{ ok: true }>("POST", `/api/v1/admin/machines/${encodeURIComponent(machine_id)}/revoke`),
+  pendingCodes: () =>
+    req<{ codes: PendingCode[] }>("GET", "/api/v1/admin/enroll-codes"),
+  deleteCode: (code: string) =>
+    req<{ ok: true }>("POST", `/api/v1/admin/enroll-codes/${encodeURIComponent(code)}/delete`),
 
   taxonomyRules: () => req<{ rules: TaxonomyRule[] }>("GET", "/api/v1/admin/taxonomy-rules"),
   saveTaxonomyRule: (b: Partial<TaxonomyRule>) =>

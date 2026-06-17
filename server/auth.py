@@ -25,6 +25,23 @@ def issue_enrollment_code(conn, machine_id: str | None = None, label: str = "") 
     return code
 
 
+def pending_enrollment_codes(conn) -> list[dict]:
+    """Codes that were issued but not yet consumed by an enroll (used=0)."""
+    rows = conn.execute(
+        "SELECT code, label, machine_id, created_ts FROM enrollment_code "
+        "WHERE used=0 ORDER BY created_ts DESC"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_enrollment_code(conn, code: str) -> bool:
+    """Remove an UNUSED enrollment code (e.g. issued by mistake). Returns True if a
+    pending code was deleted. Used codes are left alone — they're an enrollment record."""
+    cur = conn.execute("DELETE FROM enrollment_code WHERE code=? AND used=0", (code,))
+    conn.commit()
+    return cur.rowcount > 0
+
+
 def hash_token(token: str) -> str:
     """Return sha256 hex digest of *token* (64 lowercase hex chars)."""
     return hashlib.sha256(token.encode()).hexdigest()

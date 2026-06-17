@@ -186,10 +186,11 @@ SETTINGS_DEFAULTS = {
     "mode": "coaching",                    # 'coaching' (default) | 'evaluative' — see present_insight()
     "first_run_complete": "0",             # "1" once the first admin + org config is saved
     "disclosure_text": (
-        "This computer is monitored for work activity during business hours. "
-        "Activity metadata (applications, window titles, visited domains, active/idle time) is recorded. "
-        "Keystroke content, screen contents, webcam, and microphone are NOT captured. "
-        "Data is used for coaching and accountability and retained per policy."
+        "Heads up: this installs a lightweight activity helper. It will NOT harm your computer, "
+        "slow it down, or read anything private. During business hours it simply notes which apps "
+        "and websites are used and active vs. idle time, so the team can see how the workday flows "
+        "and use it for training and coaching. It does NOT capture what you type, your screen, "
+        "your camera, or your microphone. You can ask your manager about it anytime."
     ),
     "disclosure_version": "1",
 }

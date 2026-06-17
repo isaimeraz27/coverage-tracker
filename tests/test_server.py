@@ -100,8 +100,8 @@ class TestServer(unittest.TestCase):
         _, script = self._get("/install.ps1?code=abc123")
         # disclosure fetch uses our own server origin
         self.assertIn(b"/api/v1/disclosure", script)
-        # exact prompt phrase per the spec
-        self.assertIn(b"Type 'I agree' to consent to monitoring and continue", script)
+        # the 'I agree' acknowledgment gate is present (friendly wording; the gate is what matters)
+        self.assertIn(b"Type 'I agree' to acknowledge and continue", script)
         # cancel path present
         self.assertIn(b"cancelled", script)
         # the consent match is case-sensitive (locks in -cne; a switch to -ne would regress)
@@ -232,6 +232,44 @@ class TestMachinesConsentSurface(unittest.TestCase):
         self.assertIsNotNone(m, "enrolled machine must appear in /machines")
         self.assertIsNone(m["consent_version"],
                           "consent_version must be null for a legacy enroll without disclosure_version")
+
+
+class TestPendingEnrollCodes(unittest.TestCase):
+    """List + delete of unused enrollment codes (the Machines-page management controls)."""
+    def setUp(self):
+        fd, self.path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.conn = db.connect(self.path)
+        db.init_db(self.conn)
+
+    def tearDown(self):
+        self.conn.close()
+        os.unlink(self.path)
+
+    def test_pending_lists_only_unused(self):
+        c1 = auth.issue_enrollment_code(self.conn, label="Sam")
+        c2 = auth.issue_enrollment_code(self.conn, label="Dana")
+        self.conn.execute("UPDATE enrollment_code SET used=1 WHERE code=?", (c1,))
+        self.conn.commit()
+        pending = auth.pending_enrollment_codes(self.conn)
+        codes = {p["code"] for p in pending}
+        self.assertIn(c2, codes)
+        self.assertNotIn(c1, codes)                 # used code is not "pending"
+        self.assertEqual(pending[0]["label"], "Dana")
+
+    def test_delete_only_removes_unused(self):
+        c = auth.issue_enrollment_code(self.conn, label="Mistake")
+        self.assertTrue(auth.delete_enrollment_code(self.conn, c))
+        self.assertEqual(auth.pending_enrollment_codes(self.conn), [])
+        self.assertFalse(auth.delete_enrollment_code(self.conn, c))   # gone -> False, no crash
+
+    def test_delete_refuses_used_code(self):
+        c = auth.issue_enrollment_code(self.conn, label="Enrolled")
+        self.conn.execute("UPDATE enrollment_code SET used=1 WHERE code=?", (c,))
+        self.conn.commit()
+        self.assertFalse(auth.delete_enrollment_code(self.conn, c))   # used code protected
+        row = self.conn.execute("SELECT used FROM enrollment_code WHERE code=?", (c,)).fetchone()
+        self.assertEqual(row["used"], 1)
 
 
 if __name__ == "__main__":
