@@ -1,0 +1,44 @@
+name: Build agent .exe
+
+# Builds coverage-agent.exe on a real Windows runner (PyInstaller can't cross-compile),
+# so no local Windows machine / VM is needed. Runs on demand and whenever the agent code
+# changes. The finished .exe is uploaded as a downloadable artifact.
+on:
+  workflow_dispatch: {}            # manual "Run workflow" button
+  push:
+    paths:                         # only rebuild when the agent or its inputs change
+      - 'agent/**'
+      - 'shared/contracts.py'
+      - 'scripts/run_agent.py'
+      - 'build/coverage-agent.spec'
+      - 'scripts/build_agent.ps1'
+      - '.github/workflows/build-agent.yml'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build coverage-agent.exe
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts\build_agent.ps1
+
+      - name: Smoke-check the exe exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path dist\coverage-agent.exe)) { throw "build produced no exe" }
+          "{0:N1} MB" -f ((Get-Item dist\coverage-agent.exe).Length / 1MB)
+
+      - name: Upload the .exe as a downloadable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-agent-exe
+          path: dist/coverage-agent.exe
+          if-no-files-found: error
